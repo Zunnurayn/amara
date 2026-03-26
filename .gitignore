@@ -16,6 +16,7 @@ build
 
 # Expo
 .expo
+.expo-shared
 *.jks
 *.p8
 *.p12
@@ -43,3 +44,21 @@ npm-debug.log*
 
 # Turbo
 .turbo
+
+# React Native (bare)
+**/android/.gradle
+**/android/.idea
+**/android/.settings
+**/android/.kotlin
+**/android/local.properties
+**/android/**/build
+**/android/app/.cxx
+**/android/app/.externalNativeBuild
+**/ios/Pods
+**/ios/build
+**/ios/DerivedData
+**/ios/*.xcworkspace
+**/ios/*.xcuserstate
+*.ipa
+*.apk
+*.aab
