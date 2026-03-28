@@ -2,8 +2,6 @@
 @tailwind components;
 @tailwind utilities;
 
-@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=DM+Sans:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap');
-
 :root {
   --earth:     #1A1208;
   --soil:      #221A0E;
@@ -19,6 +17,9 @@
   --text:      #F5E6C8;
   --text2:     #C8AA7A;
   --muted:     #7A5E3A;
+  --font-display: Georgia, "Times New Roman", serif;
+  --font-body: "Segoe UI", Helvetica, Arial, sans-serif;
+  --font-mono: "SFMono-Regular", "Consolas", "Liberation Mono", monospace;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -26,7 +27,7 @@
 body {
   background: var(--earth);
   color: var(--text);
-  font-family: 'DM Sans', sans-serif;
+  font-family: var(--font-body);
   -webkit-font-smoothing: antialiased;
 }
 

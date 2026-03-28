@@ -1,8 +1,12 @@
 {
-  "extends": "@anara/config/tsconfig/node",
+  "extends": "../../packages/config/tsconfig.node.json",
   "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
     "outDir": "dist",
-    "rootDir": "src"
+    "rootDir": "src",
+    "types": ["node"],
+    "esModuleInterop": true
   },
   "include": ["src"]
 }

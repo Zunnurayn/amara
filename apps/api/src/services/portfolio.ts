@@ -48,7 +48,7 @@ export async function getTokenBalances(address: string, chainId: number) {
     }),
   })
 
-  const data = await res.json()
+  const data = await res.json() as any
   return (data.result?.tokenBalances ?? []) as TokenBalance[]
 }
 
@@ -80,7 +80,7 @@ export async function getTokenMetadata(contractAddress: string, chainId: number)
     }),
   })
 
-  const data = await res.json()
+  const data = await res.json() as any
   return data.result
 }
 
@@ -99,7 +99,7 @@ export async function getNativeBalance(address: string, chainId: number): Promis
     }),
   })
 
-  const data = await res.json()
+  const data = await res.json() as any
   // Convert hex wei to ETH string
   const wei    = BigInt(data.result ?? '0x0')
   const ethVal = Number(wei) / 1e18
@@ -116,7 +116,7 @@ export async function getTokenPrices(symbols: string[]): Promise<Record<string, 
   if (!ids) return {}
 
   const res  = await fetch(`${COINGECKO_URL}/simple/price?ids=${ids}&vs_currencies=usd&include_24hr_change=true`)
-  const data = await res.json()
+  const data = await res.json() as any
 
   const prices: Record<string, number> = {}
   for (const sym of symbols) {
@@ -135,7 +135,7 @@ export async function getNFTs(address: string, chainId: number) {
     : `https://eth-mainnet.g.alchemy.com/nft/v3/${process.env.ALCHEMY_API_KEY}`
 
   const res  = await fetch(`${url}/getNFTsForOwner?owner=${address}&withMetadata=true&pageSize=20`)
-  const data = await res.json()
+  const data = await res.json() as any
   return data.ownedNfts ?? []
 }
 
@@ -213,8 +213,8 @@ export async function buildPortfolio(address: string) {
 
   const nativeBaseUsd = parseFloat(nativeBaseVal) * ethPrice
   const nativeEthUsd  = parseFloat(nativeEthVal)  * ethPrice
-  if (nativeBaseUsd > 0) chainTotals[8453] += nativeBaseUsd
-  if (nativeEthUsd > 0)  chainTotals[1]    += nativeEthUsd
+  if (nativeBaseUsd > 0) chainTotals[8453] = (chainTotals[8453] ?? 0) + nativeBaseUsd
+  if (nativeEthUsd > 0)  chainTotals[1] = (chainTotals[1] ?? 0) + nativeEthUsd
   totalUsdValue += nativeBaseUsd + nativeEthUsd
 
   if (parseFloat(nativeBaseVal) > 0) {

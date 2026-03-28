@@ -15,7 +15,8 @@ const C = {
 }
 
 export default function HomeScreen() {
-  const { user, authenticated } = usePrivy()
+  const { user } = usePrivy()
+  const authenticated = Boolean(user)
   const [showBrief, setShowBrief]   = useState(true)
   const [briefDone, setBriefDone]   = useState(false)
   const fadeAnim = useRef(new Animated.Value(0)).current

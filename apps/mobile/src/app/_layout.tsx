@@ -23,6 +23,8 @@ export default function RootLayout() {
     Notifications.setNotificationHandler({
       handleNotification: async () => ({
         shouldShowAlert: true,
+        shouldShowBanner: true,
+        shouldShowList: true,
         shouldPlaySound: true,
         shouldSetBadge:  true,
       }),
@@ -53,7 +55,6 @@ export default function RootLayout() {
       <SafeAreaProvider>
         <PrivyProvider
           appId={process.env.EXPO_PUBLIC_PRIVY_APP_ID ?? ''}
-          clientId={process.env.EXPO_PUBLIC_PRIVY_CLIENT_ID ?? ''}
         >
           <QueryClientProvider client={queryClient}>
             <StatusBar style="light" backgroundColor="#1A1208" />

@@ -236,6 +236,11 @@ export function ActionCard({ card, onConfirm, onCancel }: ActionCardProps) {
   const accent = actionCardAccent[card.type] ?? colors.gold
   const icon   = actionCardIcons[card.type] ?? '◆'
   const done   = card.status === 'confirmed' || card.status === 'failed' || card.status === 'cancelled'
+  const badgeVariant =
+    card.status === 'pending' ? 'watching' :
+    card.status === 'confirmed' ? 'active' :
+    card.status === 'failed' ? 'error' :
+    'paused'
 
   return (
     <div className="bg-soil border border-border overflow-hidden w-full">
@@ -246,10 +251,7 @@ export function ActionCard({ card, onConfirm, onCancel }: ActionCardProps) {
       <div className="flex items-center gap-2 px-3 py-2.5 border-b border-border">
         <span className="text-base">{icon}</span>
         <span className="text-[10px] font-bold uppercase tracking-wider text-text2">{card.title}</span>
-        <Badge
-          variant={card.status === 'pending' ? 'watching' : card.status === 'confirmed' ? 'active' : 'paused'}
-          className="ml-auto"
-        >
+        <Badge variant={badgeVariant} className="ml-auto">
           {card.status === 'executing' ? '⟳ Executing' : card.status.toUpperCase()}
         </Badge>
       </div>
@@ -309,6 +311,12 @@ export function ActionCard({ card, onConfirm, onCancel }: ActionCardProps) {
 
       {card.status === 'cancelled' && (
         <div className="px-3 py-3 text-muted text-[11px]">✕ Cancelled</div>
+      )}
+
+      {card.status === 'failed' && (
+        <div className="px-3 py-3 text-kola text-[11px] font-bold">
+          Transaction could not be completed. Review the route or try again.
+        </div>
       )}
     </div>
   )

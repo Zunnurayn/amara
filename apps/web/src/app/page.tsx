@@ -1,12 +1,12 @@
 'use client'
 
 import { useEffect } from 'react'
-import { usePrivy } from '@privy-io/react-auth'
 import { useRouter } from 'next/navigation'
-import { AnaraLogo } from '@anara/ui'
+import { AnaraLogo } from '../components/ui'
+import { useAuth } from '../lib/auth'
 
 export default function RootPage() {
-  const { ready, authenticated } = usePrivy()
+  const { ready, authenticated } = useAuth()
   const router = useRouter()
 
   useEffect(() => {

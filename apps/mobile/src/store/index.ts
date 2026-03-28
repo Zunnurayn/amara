@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { AgentMessage, AgentState, TokenBalance } from '@anara/types'
+import type { AgentMessage, AgentState, TokenBalance, Transaction } from '@anara/types'
 
 // ── Wallet Store ──
 interface WalletStore {
@@ -7,9 +7,11 @@ interface WalletStore {
   chainId:      number
   totalUsd:     string
   tokens:       TokenBalance[]
+  transactions: Transaction[]
   setAddress:   (a: string | null) => void
   setChainId:   (id: number) => void
   setPortfolio: (d: { totalUsd: string; tokens: TokenBalance[] }) => void
+  setTransactions: (transactions: Transaction[]) => void
 }
 
 export const useWalletStore = create<WalletStore>()((set) => ({
@@ -17,9 +19,11 @@ export const useWalletStore = create<WalletStore>()((set) => ({
   chainId:      8453,
   totalUsd:     '$0.00',
   tokens:       [],
+  transactions: [],
   setAddress:   (address)  => set({ address }),
   setChainId:   (chainId)  => set({ chainId }),
   setPortfolio: (data)     => set(data),
+  setTransactions: (transactions) => set({ transactions }),
 }))
 
 // ── Agent Store ──
@@ -29,6 +33,7 @@ interface AgentStore {
   state:       AgentState
   isThinking:  boolean
   addMessage:  (msg: AgentMessage) => void
+  updateMessage: (id: string, updater: (msg: AgentMessage) => AgentMessage) => void
   setThinking: (v: boolean) => void
   updateState: (s: Partial<AgentState>) => void
   clearChat:   () => void
@@ -45,6 +50,9 @@ export const useAgentStore = create<AgentStore>()((set) => ({
   state:       DEFAULT_STATE,
   isThinking:  false,
   addMessage:  (msg)   => set((s) => ({ messages: [...s.messages, msg] })),
+  updateMessage: (id, updater) => set((s) => ({
+    messages: s.messages.map((msg) => (msg.id === id ? updater(msg) : msg)),
+  })),
   setThinking: (v)     => set({ isThinking: v }),
   updateState: (state) => set((s) => ({ state: { ...s.state, ...state } })),
   clearChat:   ()      => set({ messages: [] }),

@@ -2,6 +2,7 @@ import { Router } from 'express'
 import { buildPortfolio } from '../services/portfolio'
 import { getRecentTransactions } from '../services/transactions'
 import { getUserByWalletAddress, savePortfolioSnapshot, saveTransaction } from '../db/client'
+import type { Transaction } from '@anara/types'
 
 export const walletRouter = Router()
 
@@ -46,7 +47,7 @@ walletRouter.get('/:address/transactions', async (req, res) => {
     const user = await getUserByWalletAddress(address)
 
     if (user) {
-      await Promise.allSettled(txs.map((tx) => saveTransaction(user.id, {
+      await Promise.allSettled(txs.map((tx: Transaction) => saveTransaction(user.id, {
         txHash:        tx.hash,
         chainId:       tx.chainId,
         txType:        tx.type,

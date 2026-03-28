@@ -1,10 +1,10 @@
 'use client'
 
-import { useState } from 'react'
-import { usePrivy } from '@privy-io/react-auth'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { AnaraLogo, KenteStrip, LiveDot } from '@anara/ui'
-import { colors } from '@anara/ui/tokens'
+import { AnaraLogo, KenteStrip, LiveDot } from '../../components/ui'
+import { colors } from '../../lib/ui-tokens'
+import { useAuth } from '../../lib/auth'
 
 const FEATURES = [
   { icon: '🤖', title: 'Autonomous Agent',    body: 'Executes arbitrage, yield compounding, and rebalancing 24/7 — no approvals needed.' },
@@ -14,20 +14,21 @@ const FEATURES = [
 ]
 
 export default function OnboardPage() {
-  const { login, authenticated } = usePrivy()
+  const { login, authenticated } = useAuth()
   const router  = useRouter()
   const [loading, setLoading] = useState(false)
 
-  if (authenticated) {
-    router.push('/dashboard')
-    return null
-  }
+  useEffect(() => {
+    if (authenticated) {
+      router.replace('/dashboard')
+    }
+  }, [authenticated, router])
 
   const handleLogin = async (method: 'email' | 'sms' | 'wallet' | 'google') => {
     setLoading(true)
     try {
       await login({ loginMethods: [method] })
-      router.push('/dashboard')
+      router.replace('/dashboard')
     } catch (err) {
       console.error(err)
     } finally {

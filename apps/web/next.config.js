@@ -1,6 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  transpilePackages: ['@anara/ui', '@anara/chain', '@anara/types'],
+  transpilePackages: ['@anara/types'],
   images: {
     domains: ['assets.coingecko.com', 'ipfs.io', 'arweave.net'],
   },

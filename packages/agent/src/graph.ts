@@ -9,7 +9,7 @@ import { getPortfolioSummary, getAssetPrice } from './tools/portfolio'
 import { getStrategyStatus, toggleStrategy } from './tools/strategy'
 import type { AgentMessage, AgentActionCard } from '@anara/types'
 
-const claude = new Anthropic()
+const claude = process.env.ANTHROPIC_API_KEY ? new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY }) : null
 
 export interface AgentRunInput {
   sessionId: string
@@ -123,16 +123,14 @@ export async function runAgent(input: AgentRunInput): Promise<AgentRunOutput> {
     },
   ]
 
-  const response = await claude.messages.create({
-    model: 'claude-sonnet-4-5',
-    max_tokens: 600,
-    system: systemPrompt,
-    messages,
-  })
-
-  const assistantMessage = response.content[0]?.type === 'text'
-    ? response.content[0].text
-    : 'I encountered an issue. Please try again.'
+  const assistantMessage = claude
+    ? await generateClaudeMessage(systemPrompt, messages)
+    : buildLocalAssistantMessage({
+        intent: intent.type,
+        actionCard: toolResult.actionCard,
+        toolContext: toolResult.toolContext,
+        userMessage,
+      })
 
   // 6. Save to memory
   await appendMessage(sessionId, { role: 'user', content: userMessage, timestamp: Date.now() })
@@ -144,4 +142,52 @@ export async function runAgent(input: AgentRunInput): Promise<AgentRunOutput> {
     requiresConfirmation: intent.requiresConfirmation,
     intent: intent.type,
   }
+}
+
+async function generateClaudeMessage(
+  system: string,
+  messages: { role: 'user' | 'assistant'; content: string }[],
+) {
+  const response = await claude!.messages.create({
+    model: 'claude-sonnet-4-5',
+    max_tokens: 600,
+    system,
+    messages,
+  })
+
+  return response.content[0]?.type === 'text'
+    ? response.content[0].text
+    : 'I encountered an issue. Please try again.'
+}
+
+function buildLocalAssistantMessage({
+  intent,
+  actionCard,
+  toolContext,
+  userMessage,
+}: {
+  intent: string
+  actionCard?: AgentActionCard
+  toolContext?: string
+  userMessage: string
+}) {
+  if (actionCard) {
+    if (intent === 'swap') return `I prepared a swap preview for "${userMessage}". Review the route and confirm if you want to continue.`
+    if (intent === 'send') return `I prepared the transfer details for "${userMessage}". Confirm when you are ready to proceed.`
+    if (intent === 'bridge') return `I prepared a bridge preview for "${userMessage}". Confirm to continue with execution.`
+  }
+
+  if (intent === 'query') {
+    return toolContext
+      ? `Here is the latest wallet summary I could assemble locally: ${toolContext}`
+      : 'I could not find enough wallet data for that query yet.'
+  }
+
+  if (intent === 'strategy') {
+    return toolContext
+      ? `Strategy update: ${toolContext}`
+      : 'I could not update that strategy yet.'
+  }
+
+  return 'Local agent fallback is active. I can still help with swaps, sends, bridges, portfolio questions, and strategy controls.'
 }

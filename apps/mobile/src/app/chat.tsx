@@ -11,7 +11,7 @@ import { useAgent } from '../hooks/useAgent'
 const C = {
   earth: '#1A1208', soil: '#221A0E', clay: '#2E2010', border: '#4A3520',
   gold: '#D4920A', gold2: '#F0B429', kola: '#C0392B', green: '#2ECC71',
-  teal: '#48C9B0', text: '#F5E6C8', text2: '#C8AA7A', muted: '#7A5E3A',
+  teal: '#48C9B0', text: '#F5E6C8', text2: '#C8AA7A', muted: '#7A5E3A', clay2: '#382715',
 }
 
 const SUGGESTIONS = [
@@ -23,7 +23,7 @@ const SUGGESTIONS = [
 ]
 
 export default function ChatScreen() {
-  const { messages, isThinking, sendMessage } = useAgent()
+  const { messages, isThinking, sendMessage, executeAction, cancelAction } = useAgent()
   const [input, setInput]             = useState('')
   const [suggsDismissed, setSuggsDismissed] = useState(false)
   const scrollRef = useRef<ScrollView>(null)
@@ -111,10 +111,16 @@ export default function ChatScreen() {
                         </View>
                       ))}
                       <View style={styles.actionBtns}>
-                        <TouchableOpacity style={styles.confirmBtn} onPress={() => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)}>
+                        <TouchableOpacity
+                          style={styles.confirmBtn}
+                          onPress={async () => {
+                            await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
+                            await executeAction(msg.id, msg.actionCard!)
+                          }}
+                        >
                           <Text style={styles.confirmBtnText}>Execute →</Text>
                         </TouchableOpacity>
-                        <TouchableOpacity style={styles.cancelBtn}>
+                        <TouchableOpacity style={styles.cancelBtn} onPress={() => cancelAction(msg.id)}>
                           <Text style={styles.cancelBtnText}>Cancel</Text>
                         </TouchableOpacity>
                       </View>
@@ -193,7 +199,7 @@ export default function ChatScreen() {
 
 const styles = StyleSheet.create({
   container:         { flex: 1, backgroundColor: C.earth },
-  header:            { flexDirection: 'row', alignItems: 'center', padding: '12px 14px', gap: 10, backgroundColor: C.soil, borderBottomWidth: 1, borderBottomColor: C.border },
+  header:            { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 14, gap: 10, backgroundColor: C.soil, borderBottomWidth: 1, borderBottomColor: C.border },
   backBtn:           { width: 32, height: 32, backgroundColor: C.clay, borderWidth: 1, borderColor: C.border, alignItems: 'center', justifyContent: 'center' },
   backText:          { color: C.text2, fontSize: 18, lineHeight: 20 },
   agentInfo:         { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 },
@@ -207,16 +213,16 @@ const styles = StyleSheet.create({
   agentMsgWrap:      { alignSelf: 'flex-start', maxWidth: '88%' },
   userMsgWrap:       { alignSelf: 'flex-end', maxWidth: '88%' },
   agentMsg:          { alignItems: 'flex-start', gap: 4 },
-  userMsg:           { backgroundColor: C.gold, padding: '10px 13px' },
+  userMsg:           { backgroundColor: C.gold, paddingVertical: 10, paddingHorizontal: 13 },
   userMsgText:       { fontSize: 12.5, color: C.earth, fontWeight: '500', lineHeight: 18 },
-  bubble:            { backgroundColor: C.soil, borderWidth: 1, borderColor: C.border, padding: '10px 13px' },
+  bubble:            { backgroundColor: C.soil, borderWidth: 1, borderColor: C.border, paddingVertical: 10, paddingHorizontal: 13 },
   bubbleText:        { fontSize: 12.5, color: C.text, lineHeight: 18 },
   bubbleHint:        { color: C.muted, fontSize: 10.5, fontStyle: 'italic' },
   msgTime:           { fontSize: 9.5, color: C.muted, fontFamily: 'monospace' },
-  typingBubble:      { flexDirection: 'row', gap: 4, backgroundColor: C.soil, borderWidth: 1, borderColor: C.border, padding: '12px 14px', alignItems: 'center' },
+  typingBubble:      { flexDirection: 'row', gap: 4, backgroundColor: C.soil, borderWidth: 1, borderColor: C.border, paddingVertical: 12, paddingHorizontal: 14, alignItems: 'center' },
   typingDot:         { width: 6, height: 6, borderRadius: 3, backgroundColor: C.muted },
   actionCard:        { backgroundColor: C.soil, borderWidth: 1, borderColor: C.border, width: 280, overflow: 'hidden', marginBottom: 6 },
-  actionCardTop:     { flexDirection: 'row', alignItems: 'center', gap: 8, padding: '10px 12px', borderBottomWidth: 1, borderBottomColor: C.border },
+  actionCardTop:     { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 10, paddingHorizontal: 12, borderBottomWidth: 1, borderBottomColor: C.border },
   actionCardTitle:   { fontSize: 11, fontWeight: '700', color: C.text2, textTransform: 'uppercase', letterSpacing: 0.8, flex: 1 },
   readyBadge:        { backgroundColor: `${C.gold}15`, borderWidth: 1, borderColor: `${C.gold}30`, paddingHorizontal: 7, paddingVertical: 2 },
   readyText:         { fontSize: 8, fontWeight: '700', color: C.gold2, letterSpacing: 0.6 },
@@ -225,15 +231,15 @@ const styles = StyleSheet.create({
   actionVal:         { fontSize: 10.5, fontWeight: '700', color: C.text2, fontFamily: 'monospace' },
   actionValHighlight:{ color: C.green },
   actionBtns:        { flexDirection: 'row', gap: 6, padding: 10 },
-  confirmBtn:        { flex: 1, backgroundColor: C.gold, padding: '9px 0', alignItems: 'center' },
+  confirmBtn:        { flex: 1, backgroundColor: C.gold, paddingVertical: 9, alignItems: 'center' },
   confirmBtnText:    { fontSize: 11, fontWeight: '800', color: C.earth, textTransform: 'uppercase', letterSpacing: 0.6 },
   cancelBtn:         { paddingHorizontal: 14, paddingVertical: 9, borderWidth: 1, borderColor: C.border, alignItems: 'center' },
   cancelBtnText:     { fontSize: 11, fontWeight: '700', color: C.muted },
   suggsScroll:       { flexShrink: 0, paddingVertical: 8 },
   sugg:              { backgroundColor: C.clay, borderWidth: 1, borderColor: C.border, paddingHorizontal: 12, paddingVertical: 7, marginRight: 0 },
-  suggText:          { fontSize: 10.5, fontWeight: '600', color: C.text2, whiteSpace: 'nowrap' },
-  inputBar:          { flexDirection: 'row', alignItems: 'flex-end', gap: 6, padding: '8px 12px 12px', borderTopWidth: 1, borderTopColor: C.border, backgroundColor: C.soil },
-  input:             { flex: 1, backgroundColor: C.clay, borderWidth: 1, borderColor: C.border, color: C.text, fontSize: 13, padding: '10px 12px', maxHeight: 80, lineHeight: 18, fontFamily: 'DM Sans' },
+  suggText:          { fontSize: 10.5, fontWeight: '600', color: C.text2 },
+  inputBar:          { flexDirection: 'row', alignItems: 'flex-end', gap: 6, paddingTop: 8, paddingHorizontal: 12, paddingBottom: 12, borderTopWidth: 1, borderTopColor: C.border, backgroundColor: C.soil },
+  input:             { flex: 1, backgroundColor: C.clay, borderWidth: 1, borderColor: C.border, color: C.text, fontSize: 13, paddingVertical: 10, paddingHorizontal: 12, maxHeight: 80, lineHeight: 18 },
   micBtn:            { width: 38, height: 38, backgroundColor: C.clay2, borderWidth: 1, borderColor: C.border, alignItems: 'center', justifyContent: 'center' },
   sendBtn:           { width: 38, height: 38, backgroundColor: C.gold, alignItems: 'center', justifyContent: 'center' },
   sendBtnDisabled:   { opacity: 0.4 },

@@ -1,10 +1,10 @@
 import { useState } from 'react'
 import {
-  View, Text, TouchableOpacity, StyleSheet,
+  View, Text, TouchableOpacity, StyleSheet, Alert,
   ScrollView, Dimensions, Image,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
-import { usePrivy }   from '@privy-io/expo'
+import { useOAuthFlow, usePrivy } from '@privy-io/expo'
 import { router }     from 'expo-router'
 
 const { width: W } = Dimensions.get('window')
@@ -12,7 +12,7 @@ const { width: W } = Dimensions.get('window')
 const C = {
   earth: '#1A1208', soil: '#221A0E', clay: '#2E2010', border: '#4A3520',
   gold: '#D4920A', gold2: '#F0B429', kola: '#C0392B', green: '#2ECC71',
-  teal: '#48C9B0', text: '#F5E6C8', text2: '#C8AA7A', muted: '#7A5E3A',
+  teal: '#48C9B0', text: '#F5E6C8', text2: '#C8AA7A', muted: '#7A5E3A', muted2: '#92714C', clay2: '#382715',
 }
 
 const SLIDES = [
@@ -43,7 +43,9 @@ const SLIDES = [
 ]
 
 export default function OnboardScreen() {
-  const { login, authenticated } = usePrivy()
+  const { user } = usePrivy()
+  const authenticated = Boolean(user)
+  const { start: startOAuth } = useOAuthFlow()
   const [step, setStep]          = useState<'slides' | 'auth'>('slides')
   const [slide, setSlide]        = useState(0)
   const [loading, setLoading]    = useState(false)
@@ -141,9 +143,7 @@ export default function OnboardScreen() {
           <TouchableOpacity
             style={styles.authOption}
             onPress={async () => {
-              setLoading(true)
-              try { await login({ loginMethods: ['email'] }) } catch {}
-              setLoading(false)
+              Alert.alert('Web onboarding required', 'Email and SMS login flows are not wired in this mobile scaffold yet. Use the web app to complete onboarding.')
             }}
           >
             <Text style={styles.authOptionIcon}>✉️</Text>
@@ -153,9 +153,7 @@ export default function OnboardScreen() {
           <TouchableOpacity
             style={styles.authOption}
             onPress={async () => {
-              setLoading(true)
-              try { await login({ loginMethods: ['sms'] }) } catch {}
-              setLoading(false)
+              Alert.alert('Web onboarding required', 'Phone login is not wired in this mobile scaffold yet. Use the web app to complete onboarding.')
             }}
           >
             <Text style={styles.authOptionIcon}>📱</Text>
@@ -172,12 +170,14 @@ export default function OnboardScreen() {
             style={[styles.authOption, styles.walletOption]}
             onPress={async () => {
               setLoading(true)
-              try { await login({ loginMethods: ['wallet'] }) } catch {}
+              try {
+                await startOAuth({ provider: 'google' })
+              } catch {}
               setLoading(false)
             }}
           >
             <Text style={styles.authOptionIcon}>🔑</Text>
-            <Text style={styles.authOptionText}>Connect Wallet</Text>
+            <Text style={styles.authOptionText}>Continue with Google</Text>
           </TouchableOpacity>
         </View>
 
@@ -213,7 +213,7 @@ const styles = StyleSheet.create({
   slideTitle:      { fontFamily: 'serif', fontSize: 30, fontWeight: '900', color: C.text, textAlign: 'center', lineHeight: 36 },
   slideBody:       { fontSize: 14, color: C.muted, textAlign: 'center', lineHeight: 22 },
   dots:            { flexDirection: 'row', gap: 6, justifyContent: 'center', paddingBottom: 16 },
-  dot:             { width: 6, height: 6, borderRadius: 3, backgroundColor: C.muted2, transition: 'all 0.2s' },
+  dot:             { width: 6, height: 6, borderRadius: 3, backgroundColor: C.muted2 },
   ctaRow:          { flexDirection: 'row', gap: 10, paddingHorizontal: 20, paddingBottom: 24 },
   skipBtn:         { paddingVertical: 14, paddingHorizontal: 20 },
   skipText:        { color: C.muted, fontSize: 14, fontWeight: '600' },

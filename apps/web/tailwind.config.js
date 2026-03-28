@@ -16,6 +16,10 @@ module.exports = {
         kola:      '#C0392B',
         kola2:     '#E74C3C',
         turmeric:  '#E8A020',
+        green:     '#2ECC71',
+        teal:      '#48C9B0',
+        text:      '#F5E6C8',
+        text2:     '#C8AA7A',
         cream:     '#F5E6C8',
         cream2:    '#C8AA7A',
         muted:     '#7A5E3A',
@@ -33,9 +37,14 @@ module.exports = {
         'chain-linea': '#61DAFB',
       },
       fontFamily: {
-        display: ['Playfair Display', 'serif'],
-        body:    ['DM Sans', 'sans-serif'],
-        mono:    ['Space Mono', 'monospace'],
+        display: ['Georgia', 'Times New Roman', 'serif'],
+        body: ['Segoe UI', 'Helvetica', 'Arial', 'sans-serif'],
+        mono: ['SFMono-Regular', 'Consolas', 'Liberation Mono', 'monospace'],
+      },
+      boxShadow: {
+        gold: '0 4px 20px rgba(212,146,10,0.4)',
+        dark: '0 8px 32px rgba(0,0,0,0.6)',
+        glow: '0 0 40px rgba(212,146,10,0.1)',
       },
       backgroundImage: {
         'kente': "repeating-linear-gradient(90deg, #D4920A 0,#D4920A 10px, #C0392B 10px, #C0392B 20px, #E8A020 20px, #E8A020 30px, #1A1208 30px, #1A1208 36px)",

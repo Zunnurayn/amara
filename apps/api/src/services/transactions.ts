@@ -82,7 +82,7 @@ async function fetchTransfers(address: string, chainId: number, direction: Trans
     }),
   })
 
-  const data = await res.json()
+  const data = await res.json() as any
   return (data.result?.transfers ?? []) as TransferRecord[]
 }
 

@@ -1,22 +1,20 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { usePrivy }    from '@privy-io/react-auth'
 import { useRouter }   from 'next/navigation'
-import { AnaraLogo, KenteStrip, Badge, Card, StatGrid, LiveDot } from '@anara/ui'
-import { colors } from '@anara/ui/tokens'
+import { AnaraLogo, KenteStrip, Badge, Card, StatGrid, LiveDot } from '../../components/ui'
+import { colors, shadows } from '../../lib/ui-tokens'
 import { useWalletStore, useAgentStore, useUIStore } from '../../store'
 import { useAgent } from '../../hooks/useAgent'
+import { resolveWalletIdentity } from '../../lib/wallet'
+import { useAuth } from '../../lib/auth'
 
 export default function DashboardPage() {
-  const { ready, authenticated, user, logout } = usePrivy()
+  const { ready, authenticated, user, logout } = useAuth()
   const router  = useRouter()
-  const { fetchBrief } = useAgent()
-  const { totalUsd, tokens } = useWalletStore()
-  const { state: agentState } = useAgentStore()
-  const { setChatOpen } = useAgentStore()
-
-  const [brief, setBrief]           = useState<Brief | null>(null)
+  const { fetchBrief, fetchStatus, refreshWallet } = useAgent()
+  const { totalUsd, tokens, transactions, isLoading, error, hasWallet, lastUpdated, setAddress, setHasWallet } = useWalletStore()
+  const { state: agentState, brief, setChatOpen } = useAgentStore()
   const [showBrief, setShowBrief]   = useState(true)
   const [activeTab, setActiveTab]   = useState<'activity' | 'assets' | 'nfts'>('activity')
   const [chainOpen, setChainOpen]   = useState(false)
@@ -27,11 +25,20 @@ export default function DashboardPage() {
 
   useEffect(() => {
     if (authenticated) {
-      fetchBrief().then(data => { if (data) setBrief(data) })
+      const { address: walletAddress, hasWallet } = resolveWalletIdentity(user)
+      setHasWallet(hasWallet)
+      if (walletAddress) setAddress(walletAddress)
+      if (walletAddress) {
+        fetchStatus()
+        refreshWallet()
+        fetchBrief()
+      }
     }
-  }, [authenticated, fetchBrief])
+  }, [authenticated, user, setAddress, setHasWallet, fetchBrief, fetchStatus, refreshWallet])
 
   if (!ready || !authenticated) return <LoadingSplash />
+
+  if (!hasWallet) return <MissingWalletState />
 
   if (showBrief && brief) {
     return <BriefModal brief={brief} onDismiss={() => setShowBrief(false)} />
@@ -91,6 +98,24 @@ export default function DashboardPage() {
 
       {/* ── Main content ── */}
       <main className="flex-1 max-w-md mx-auto w-full pb-8">
+        {error && (
+          <div className="mx-4 mt-4 border border-kola/30 bg-kola/10 px-4 py-3 text-[12px] text-text2">
+            <div className="font-bold text-kola mb-1">Wallet data is partially unavailable</div>
+            <div>{error}</div>
+            <button
+              onClick={() => refreshWallet()}
+              className="mt-2 text-[11px] font-bold uppercase tracking-wide text-gold2 hover:text-gold"
+            >
+              Retry refresh
+            </button>
+          </div>
+        )}
+
+        {!error && lastUpdated && (
+          <div className="mx-4 mt-4 text-[10px] font-mono text-muted">
+            Last synced {formatRelativeSync(lastUpdated)}
+          </div>
+        )}
 
         {/* Portfolio hero */}
         <PortfolioHero totalUsd={totalUsd || '$24,847.32'} />
@@ -136,7 +161,7 @@ export default function DashboardPage() {
 
             {/* Tab content */}
             <div className="min-h-[200px]">
-              {activeTab === 'activity' && <ActivityTab />}
+              {activeTab === 'activity' && <ActivityTab transactions={transactions} isLoading={isLoading} error={error} />}
               {activeTab === 'assets'   && <AssetsTab tokens={tokens} />}
               {activeTab === 'nfts'     && <NFTsTab />}
             </div>
@@ -152,13 +177,23 @@ export default function DashboardPage() {
             { label: 'Uptime',         value: '99.9%', color: colors.teal },
           ]} />
         </div>
+
+        {!brief && !isLoading && (
+          <div className="px-4 pt-4">
+            <Card>
+              <div className="p-4 text-[12px] text-muted">
+                No recent agent brief is available yet. Open chat to issue your first action or refresh once activity exists.
+              </div>
+            </Card>
+          </div>
+        )}
       </main>
 
       {/* Agent FAB */}
       <button
         onClick={() => { setChatOpen(true); router.push('/dashboard/chat') }}
         className="fixed bottom-6 right-4 w-14 h-14 rounded-full bg-gold flex items-center justify-center text-2xl z-20"
-        style={{ boxShadow: colors.shadows?.gold ?? '0 4px 20px rgba(212,146,10,0.4)' }}
+        style={{ boxShadow: shadows.gold }}
       >
         🤖
         <span
@@ -186,6 +221,25 @@ interface Brief {
   actionsCount: number
   errorsCount: number
   events: { type: string; description: string; timeAgo: string; profitUsd: string | null }[]
+}
+
+function MissingWalletState() {
+  return (
+    <div className="min-h-screen bg-earth text-cream">
+      <KenteStrip height={4} />
+      <div className="max-w-xl mx-auto px-6 py-16">
+        <Card kente>
+          <div className="p-6">
+            <div className="text-[10px] tracking-[0.2em] uppercase text-muted font-bold mb-3">Wallet Required</div>
+            <h1 className="text-3xl font-display font-black mb-3">Connect or create a wallet to continue.</h1>
+            <p className="text-sm text-muted leading-6">
+              Your account is authenticated, but there is no linked wallet address available for dashboard and agent actions yet.
+            </p>
+          </div>
+        </Card>
+      </div>
+    </div>
+  )
 }
 
 function BriefModal({ brief, onDismiss }: { brief: Brief; onDismiss: () => void }) {
@@ -354,29 +408,30 @@ function StrategyCard({ id, icon, name, pnl, sub, accent, status }: typeof STRAT
   )
 }
 
-function ActivityTab() {
-  const items = [
-    { icon: '⚡', type: 'arb',    msg: 'Flash arb: USDC→WETH→USDC',         profit: '+$12.40', time: '8m ago',  ok: true  },
-    { icon: '🌾', type: 'yield',  msg: '4.2 AERO claimed and compounded',    profit: '+$2.18',  time: '22m ago', ok: true  },
-    { icon: '⚡', type: 'arb',    msg: 'Arb scan — slippage too high, skip', profit: null,      time: '45m ago', ok: false },
-    { icon: '⚡', type: 'arb',    msg: 'Triangular arb: USDC→ETH→WBTC',     profit: '+$47.32', time: '2h ago',  ok: true  },
-    { icon: '🏗️', type: 'brickt', msg: 'Brickt Pool #3 yield accrued',      profit: '+$16.00', time: '3h ago',  ok: true  },
-  ]
+function ActivityTab({ transactions, isLoading, error }: { transactions: any[]; isLoading: boolean; error: string | null }) {
+  if (isLoading) return <EmptyTabState message="Loading wallet activity…" />
+  if (error && !transactions.length) return <EmptyTabState message={error} />
+  if (!transactions.length) return <EmptyTabState message="No wallet activity yet." />
   return (
     <div>
-      {items.map((item, i) => (
+      {transactions.map((item: any, i: number) => (
         <div key={i} className="flex gap-3 items-start px-4 py-3 border-b border-border/50 last:border-b-0 hover:bg-clay/30 transition-colors">
           <div className={`w-7 h-7 flex items-center justify-center text-xs flex-shrink-0 border ${
-            item.type === 'arb' ? 'bg-kola/15 border-kola/20' :
-            item.type === 'yield' ? 'bg-gold/12 border-gold/20' :
+            item.type === 'send' ? 'bg-kola/15 border-kola/20' :
+            item.type === 'receive' ? 'bg-green/10 border-green/20' :
             'bg-teal/10 border-teal/20'
-          }`}>{item.icon}</div>
+          }`}>{item.type === 'send' ? '↑' : item.type === 'receive' ? '↓' : '⇄'}</div>
           <div className="flex-1">
-            <div className="text-[12px] text-cream">{item.msg}</div>
+            <div className="text-[12px] text-cream">{item.valueFormatted ?? item.type}</div>
+            <div className="text-[10px] text-muted font-mono mt-1">
+              {item.hash ? `${item.hash.slice(0, 10)}…${item.hash.slice(-4)}` : 'Pending hash'}
+              {' · '}
+              {item.chainId === 1 ? 'Ethereum' : 'Base'}
+            </div>
             <div className="flex gap-2 mt-1 items-center">
-              <div className={`w-1 h-1 rounded-full ${item.ok ? 'bg-green' : 'bg-muted2'}`} />
-              <span className="text-[10px] text-muted font-mono">{item.time}</span>
-              {item.profit && <span className="text-[10px] font-bold text-green font-mono">{item.profit}</span>}
+              <div className={`w-1 h-1 rounded-full ${item.status === 'confirmed' ? 'bg-green' : 'bg-muted2'}`} />
+              <span className="text-[10px] text-muted font-mono">{formatTime(item.timestamp)}</span>
+              {item.valueUsd && <span className="text-[10px] font-bold text-green font-mono">{item.valueUsd}</span>}
             </div>
           </div>
         </div>
@@ -386,13 +441,18 @@ function ActivityTab() {
 }
 
 function AssetsTab({ tokens }: { tokens: any[] }) {
-  const assets = tokens.length ? tokens : [
-    { symbol: 'USDC',    icon: '$', amount: '8,420.00',  value: '$8,420', chain: 'BASE', color: colors.chains.base },
-    { symbol: 'ETH',     icon: 'E', amount: '2.847 ETH', value: '$9,427', chain: 'ETH',  color: colors.chains.eth  },
-    { symbol: 'WETH',    icon: 'W', amount: '0.820',     value: '$2,714', chain: 'BASE', color: colors.chains.base },
-    { symbol: 'BRICKT',  icon: 'B', amount: '4 pools',   value: '$3,200', chain: 'BASE', color: '#C8956A'          },
-    { symbol: 'AERO-LP', icon: 'A', amount: '1,240 LP',  value: '$1,086', chain: 'BASE', color: colors.gold        },
-  ]
+  if (!tokens.length) return <EmptyTabState message="No token balances found for this wallet yet." />
+  const assets = [...tokens]
+    .sort((a: any, b: any) => parseUsdAmount(b.balanceUsd) - parseUsdAmount(a.balanceUsd))
+    .map((token: any) => ({
+    symbol: token.symbol,
+    icon: String(token.symbol ?? '?').slice(0, 1),
+    amount: token.balanceFormatted,
+    value: token.balanceUsd,
+    name: token.name,
+    chain: token.chainId === 1 ? 'ETH' : 'BASE',
+    color: token.chainId === 1 ? colors.chains.eth : colors.chains.base,
+  }))
   return (
     <div>
       {assets.map((a: any, i: number) => (
@@ -404,6 +464,7 @@ function AssetsTab({ tokens }: { tokens: any[] }) {
             >{a.icon}</div>
             <div>
               <div className="text-[13px] font-bold">{a.symbol}</div>
+              <div className="text-[10px] text-muted">{a.name}</div>
               <span className="text-[8px] text-muted bg-clay border border-border px-1.5 py-0.5 font-mono">{a.chain}</span>
             </div>
           </div>
@@ -418,31 +479,30 @@ function AssetsTab({ tokens }: { tokens: any[] }) {
 }
 
 function NFTsTab() {
-  const nfts = [
-    { coll: 'Brickt Land', name: 'Lekki Plot #03', floor: '0.08 ETH', emoji: '🏗️', chain: 'BASE' },
-    { coll: 'Brickt Land', name: 'Abuja Plot #11', floor: '0.06 ETH', emoji: '🏡', chain: 'BASE' },
-    { coll: 'Base Frens',  name: 'Fren #2847',     floor: '0.03 ETH', emoji: '🟦', chain: 'BASE' },
-    { coll: 'ENS Domains', name: 'shehu.eth',       floor: '0.01 ETH', emoji: '🔷', chain: 'ETH'  },
-  ]
-  return (
-    <div className="grid grid-cols-2 gap-2 p-3">
-      {nfts.map((n, i) => (
-        <div key={i} className="bg-clay2 border border-border overflow-hidden cursor-pointer hover:border-border2 transition-colors">
-          <div className="aspect-square flex items-center justify-center text-4xl bg-gradient-to-br from-clay to-clay2">
-            {n.emoji}
-          </div>
-          <div className="p-2">
-            <div className="text-[8px] text-muted uppercase tracking-wide">{n.coll}</div>
-            <div className="text-[11px] font-bold text-cream truncate">{n.name}</div>
-            <div className="flex justify-between mt-1">
-              <span className="text-[10px] font-bold font-mono text-gold2">{n.floor}</span>
-              <span className="text-[8px] text-muted">{n.chain}</span>
-            </div>
-          </div>
-        </div>
-      ))}
-    </div>
-  )
+  return <EmptyTabState message="NFT collection view is not wired yet. Portfolio and agent execution are the primary web flows in this phase." />
+}
+
+function EmptyTabState({ message }: { message: string }) {
+  return <div className="p-6 text-sm text-muted leading-6">{message}</div>
+}
+
+function formatTime(timestamp?: number) {
+  if (!timestamp) return 'Pending'
+  return new Date(timestamp).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+}
+
+function formatRelativeSync(timestamp: number) {
+  const diffMs = Date.now() - timestamp
+  const minutes = Math.max(0, Math.floor(diffMs / (1000 * 60)))
+  if (minutes < 1) return 'just now'
+  if (minutes < 60) return `${minutes}m ago`
+  const hours = Math.floor(minutes / 60)
+  return `${hours}h ago`
+}
+
+function parseUsdAmount(value?: string) {
+  if (!value) return 0
+  return Number.parseFloat(value.replace(/[$,]/g, '')) || 0
 }
 
 function ChainMenu() {

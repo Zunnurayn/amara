@@ -1,162 +1,332 @@
-import { createClient } from '@supabase/supabase-js'
+import { Pool, type QueryResultRow } from 'pg'
 
-if (!process.env.NEXT_PUBLIC_SUPABASE_URL) {
-  throw new Error('Missing NEXT_PUBLIC_SUPABASE_URL')
-}
-if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
-  throw new Error('Missing SUPABASE_SERVICE_ROLE_KEY')
+type DbUser = {
+  id: string
+  privy_user_id: string
+  wallet_address: string | null
+  display_name?: string | null
+  avatar_url?: string | null
 }
 
-// Server-side client (service role — bypasses RLS for agent operations)
-export const db = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY,
-  {
-    auth: { persistSession: false },
-    db:   { schema: 'public' },
+type AgentExecutionRow = {
+  id: string
+  user_id: string
+  strategy_type: string
+  status: 'success' | 'skipped' | 'failed' | 'pending'
+  description: string
+  tx_hash?: string | null
+  chain_id?: number | null
+  profit_usd?: number | null
+  executed_at: string
+  metadata?: Record<string, unknown> | null
+}
+
+type AgentSettingsRow = {
+  user_id: string
+  arb_enabled: boolean
+  yield_enabled: boolean
+  rebalance_enabled: boolean
+  brickt_enabled: boolean
+  auto_execute: boolean
+  require_approval_above: number
+  updated_at: string
+}
+
+type TransactionInsert = {
+  txHash: string
+  chainId: number
+  txType: string
+  status: string
+  fromAddress: string
+  toAddress?: string
+  valueFormatted?: string
+  valueUsd?: number
+  tokenIn?: object
+  tokenOut?: object
+  fromChainId?: number
+  toChainId?: number
+  bridgeProtocol?: string
+}
+
+const connectionString = process.env.DATABASE_URL ?? process.env.SUPABASE_DB_URL
+const pool = connectionString ? new Pool({ connectionString }) : null
+
+const memory = {
+  users: new Map<string, DbUser>(),
+  executions: new Map<string, AgentExecutionRow[]>(),
+  strategySettings: new Map<string, AgentSettingsRow>(),
+  transactions: new Map<string, TransactionInsert[]>(),
+  snapshots: new Map<string, { totalUsd: number; breakdown: object; snapshotDate: string }[]>(),
+}
+
+function randomId(prefix: string) {
+  return `${prefix}_${Math.random().toString(36).slice(2, 10)}`
+}
+
+function normalizeAddress(walletAddress?: string | null) {
+  return walletAddress?.toLowerCase() ?? null
+}
+
+async function query<T extends QueryResultRow>(sql: string, values: unknown[]) {
+  if (!pool) return null
+  return pool.query<T>(sql, values)
+}
+
+function defaultSettings(userId: string): AgentSettingsRow {
+  return {
+    user_id: userId,
+    arb_enabled: true,
+    yield_enabled: true,
+    rebalance_enabled: true,
+    brickt_enabled: true,
+    auto_execute: true,
+    require_approval_above: 500,
+    updated_at: new Date().toISOString(),
   }
-)
+}
 
-// ── User helpers ─────────────────────────────────────────────────
 export async function upsertUser(privyUserId: string, walletAddress?: string) {
-  const normalizedAddress = walletAddress ? walletAddress.toLowerCase() : undefined
-  const { data, error } = await db
-    .from('users')
-    .upsert(
-      { privy_user_id: privyUserId, wallet_address: normalizedAddress, updated_at: new Date().toISOString() },
-      { onConflict: 'privy_user_id', ignoreDuplicates: false }
-    )
-    .select()
-    .single()
+  const normalizedAddress = normalizeAddress(walletAddress)
 
-  if (error) throw new Error(`upsertUser failed: ${error.message}`)
-  return data
+  if (pool) {
+    const result = await query<DbUser>(
+      `
+        insert into users (privy_user_id, wallet_address, updated_at)
+        values ($1, $2, now())
+        on conflict (privy_user_id)
+        do update set wallet_address = excluded.wallet_address, updated_at = now()
+        returning *
+      `,
+      [privyUserId, normalizedAddress]
+    )
+    return result?.rows[0] ?? null
+  }
+
+  const existing = Array.from(memory.users.values()).find((user) => user.privy_user_id === privyUserId)
+  const nextUser: DbUser = existing ?? {
+    id: randomId('user'),
+    privy_user_id: privyUserId,
+    wallet_address: normalizedAddress,
+  }
+  nextUser.wallet_address = normalizedAddress
+  memory.users.set(nextUser.id, nextUser)
+  return nextUser
 }
 
 export async function getUserByPrivyId(privyUserId: string) {
-  const { data } = await db
-    .from('users')
-    .select('*')
-    .eq('privy_user_id', privyUserId)
-    .single()
-  return data
+  if (pool) {
+    const result = await query<DbUser>('select * from users where privy_user_id = $1 limit 1', [privyUserId])
+    return result?.rows[0] ?? null
+  }
+
+  return Array.from(memory.users.values()).find((user) => user.privy_user_id === privyUserId) ?? null
 }
 
 export async function getUserByWalletAddress(walletAddress: string) {
-  const normalizedAddress = walletAddress.toLowerCase()
-  const { data } = await db
-    .from('users')
-    .select('*')
-    .eq('wallet_address', normalizedAddress)
-    .single()
-  return data
-}
+  const normalizedAddress = normalizeAddress(walletAddress)
+  if (!normalizedAddress) return null
 
-// ── Agent settings ───────────────────────────────────────────────
-export async function getAgentSettings(userId: string) {
-  const { data } = await db
-    .from('agent_settings')
-    .select('*')
-    .eq('user_id', userId)
-    .single()
-
-  if (!data) {
-    // Create default settings
-    const { data: created } = await db
-      .from('agent_settings')
-      .insert({ user_id: userId })
-      .select()
-      .single()
-    return created
+  if (pool) {
+    const result = await query<DbUser>('select * from users where wallet_address = $1 limit 1', [normalizedAddress])
+    return result?.rows[0] ?? null
   }
-  return data
+
+  return Array.from(memory.users.values()).find((user) => user.wallet_address === normalizedAddress) ?? null
 }
 
-// ── Log agent execution ──────────────────────────────────────────
+export async function getAgentSettings(userId: string) {
+  if (pool) {
+    const existing = await query<AgentSettingsRow>(
+      'select * from agent_settings where user_id = $1 limit 1',
+      [userId]
+    )
+    if (existing?.rows[0]) return existing.rows[0]
+
+    const created = await query<AgentSettingsRow>(
+      'insert into agent_settings (user_id) values ($1) returning *',
+      [userId]
+    )
+    return created?.rows[0] ?? defaultSettings(userId)
+  }
+
+  const current = memory.strategySettings.get(userId) ?? defaultSettings(userId)
+  memory.strategySettings.set(userId, current)
+  return current
+}
+
+export async function setStrategyEnabled(userId: string, strategyId: string, enabled: boolean) {
+  const column = strategyColumnMap[strategyId]
+  if (!column) throw new Error(`Unsupported strategy: ${strategyId}`)
+
+  if (pool) {
+    await getAgentSettings(userId)
+    const result = await query<AgentSettingsRow>(
+      `update agent_settings set ${column} = $2, updated_at = now() where user_id = $1 returning *`,
+      [userId, enabled]
+    )
+    return result?.rows[0] ?? null
+  }
+
+  const settings = await getAgentSettings(userId)
+  const nextSettings = {
+    ...settings,
+    [column]: enabled,
+    updated_at: new Date().toISOString(),
+  } as AgentSettingsRow
+  memory.strategySettings.set(userId, nextSettings)
+  return nextSettings
+}
+
 export async function logExecution(data: {
-  userId:       string
+  userId: string
   strategyType: string
-  status:       'success' | 'skipped' | 'failed' | 'pending'
-  description:  string
-  txHash?:      string
-  chainId?:     number
-  profitUsd?:   number
-  gasCostUsd?:  number
-  amountUsd?:   number
+  status: 'success' | 'skipped' | 'failed' | 'pending'
+  description: string
+  txHash?: string
+  chainId?: number
+  profitUsd?: number
+  gasCostUsd?: number
+  amountUsd?: number
   errorMessage?: string
-  metadata?:    Record<string, unknown>
+  metadata?: Record<string, unknown>
 }) {
-  const { error } = await db.from('agent_executions').insert({
-    user_id:       data.userId,
+  if (pool) {
+    await query(
+      `
+        insert into agent_executions (
+          user_id, strategy_type, status, description, tx_hash, chain_id,
+          profit_usd, gas_cost_usd, amount_usd, error_message, metadata
+        )
+        values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+      `,
+      [
+        data.userId,
+        data.strategyType,
+        data.status,
+        data.description,
+        data.txHash ?? null,
+        data.chainId ?? null,
+        data.profitUsd ?? null,
+        data.gasCostUsd ?? null,
+        data.amountUsd ?? null,
+        data.errorMessage ?? null,
+        JSON.stringify(data.metadata ?? {}),
+      ]
+    )
+    return
+  }
+
+  const row: AgentExecutionRow = {
+    id: randomId('exec'),
+    user_id: data.userId,
     strategy_type: data.strategyType,
-    status:        data.status,
-    description:   data.description,
-    tx_hash:       data.txHash,
-    chain_id:      data.chainId,
-    profit_usd:    data.profitUsd,
-    gas_cost_usd:  data.gasCostUsd,
-    amount_usd:    data.amountUsd,
-    error_message: data.errorMessage,
-    metadata:      data.metadata ?? {},
-  })
-  if (error) console.error('[logExecution]', error.message)
+    status: data.status,
+    description: data.description,
+    tx_hash: data.txHash ?? null,
+    chain_id: data.chainId ?? null,
+    profit_usd: data.profitUsd ?? null,
+    executed_at: new Date().toISOString(),
+    metadata: data.metadata ?? null,
+  }
+  const current = memory.executions.get(data.userId) ?? []
+  current.unshift(row)
+  memory.executions.set(data.userId, current.slice(0, 50))
 }
 
-// ── Get agent brief data ─────────────────────────────────────────
 export async function getRecentExecutions(userId: string, sinceHours = 14) {
-  const since = new Date(Date.now() - sinceHours * 60 * 60 * 1000).toISOString()
-  const { data } = await db
-    .from('agent_executions')
-    .select('*')
-    .eq('user_id', userId)
-    .gte('executed_at', since)
-    .order('executed_at', { ascending: false })
-    .limit(20)
-  return data ?? []
+  if (pool) {
+    const result = await query<AgentExecutionRow>(
+      `
+        select *
+        from agent_executions
+        where user_id = $1
+          and executed_at >= now() - ($2 || ' hours')::interval
+        order by executed_at desc
+        limit 20
+      `,
+      [userId, sinceHours]
+    )
+    return result?.rows ?? []
+  }
+
+  const cutoff = Date.now() - sinceHours * 60 * 60 * 1000
+  return (memory.executions.get(userId) ?? []).filter(
+    (execution) => new Date(execution.executed_at).getTime() >= cutoff
+  )
 }
 
-// ── Save transaction ─────────────────────────────────────────────
-export async function saveTransaction(userId: string, tx: {
-  txHash:        string
-  chainId:       number
-  txType:        string
-  status:        string
-  fromAddress:   string
-  toAddress?:    string
-  valueFormatted?: string
-  valueUsd?:     number
-  tokenIn?:      object
-  tokenOut?:     object
-  fromChainId?:  number
-  toChainId?:    number
-  bridgeProtocol?: string
-}) {
-  const { error } = await db.from('transactions').upsert({
-    user_id:         userId,
-    tx_hash:         tx.txHash,
-    chain_id:        tx.chainId,
-    tx_type:         tx.txType,
-    status:          tx.status,
-    from_address:    tx.fromAddress,
-    to_address:      tx.toAddress,
-    value_formatted: tx.valueFormatted,
-    value_usd:       tx.valueUsd,
-    token_in:        tx.tokenIn,
-    token_out:       tx.tokenOut,
-    from_chain_id:   tx.fromChainId,
-    to_chain_id:     tx.toChainId,
-    bridge_protocol: tx.bridgeProtocol,
-  }, { onConflict: 'tx_hash,chain_id' })
-  if (error) console.error('[saveTransaction]', error.message)
+export async function saveTransaction(userId: string, tx: TransactionInsert) {
+  if (pool) {
+    await query(
+      `
+        insert into transactions (
+          user_id, tx_hash, chain_id, tx_type, status, from_address, to_address,
+          value_formatted, value_usd, token_in, token_out, from_chain_id, to_chain_id, bridge_protocol
+        )
+        values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+        on conflict (tx_hash, chain_id)
+        do update set
+          status = excluded.status,
+          value_formatted = excluded.value_formatted,
+          value_usd = excluded.value_usd,
+          token_in = excluded.token_in,
+          token_out = excluded.token_out,
+          from_chain_id = excluded.from_chain_id,
+          to_chain_id = excluded.to_chain_id,
+          bridge_protocol = excluded.bridge_protocol
+      `,
+      [
+        userId,
+        tx.txHash,
+        tx.chainId,
+        tx.txType,
+        tx.status,
+        normalizeAddress(tx.fromAddress),
+        normalizeAddress(tx.toAddress),
+        tx.valueFormatted ?? null,
+        tx.valueUsd ?? null,
+        tx.tokenIn ? JSON.stringify(tx.tokenIn) : null,
+        tx.tokenOut ? JSON.stringify(tx.tokenOut) : null,
+        tx.fromChainId ?? null,
+        tx.toChainId ?? null,
+        tx.bridgeProtocol ?? null,
+      ]
+    )
+    return
+  }
+
+  const current = memory.transactions.get(userId) ?? []
+  const next = current.filter((entry) => !(entry.txHash === tx.txHash && entry.chainId === tx.chainId))
+  next.unshift(tx)
+  memory.transactions.set(userId, next.slice(0, 100))
 }
 
-// ── Portfolio snapshot ───────────────────────────────────────────
 export async function savePortfolioSnapshot(userId: string, totalUsd: number, breakdown: object) {
-  const today = new Date().toISOString().split('T')[0]
-  await db.from('portfolio_snapshots').upsert({
-    user_id:       userId,
-    total_usd:     totalUsd,
-    breakdown,
-    snapshot_date: today,
-  }, { onConflict: 'user_id,snapshot_date' })
+  const snapshotDate = new Date().toISOString().slice(0, 10)
+
+  if (pool) {
+    await query(
+      `
+        insert into portfolio_snapshots (user_id, total_usd, breakdown, snapshot_date)
+        values ($1, $2, $3::jsonb, $4)
+        on conflict (user_id, snapshot_date)
+        do update set total_usd = excluded.total_usd, breakdown = excluded.breakdown
+      `,
+      [userId, totalUsd, JSON.stringify(breakdown), snapshotDate]
+    )
+    return
+  }
+
+  const current = memory.snapshots.get(userId) ?? []
+  const next = current.filter((entry) => entry.snapshotDate !== snapshotDate)
+  next.unshift({ totalUsd, breakdown, snapshotDate })
+  memory.snapshots.set(userId, next)
+}
+
+const strategyColumnMap: Record<string, keyof AgentSettingsRow> = {
+  arb: 'arb_enabled',
+  yield: 'yield_enabled',
+  rebalance: 'rebalance_enabled',
+  reb: 'rebalance_enabled',
+  brickt: 'brickt_enabled',
 }
