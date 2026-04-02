@@ -53,17 +53,17 @@ anara/
 | State | Zustand | Lightweight, works everywhere |
 | Auth + Wallets | Privy | Email/SMS onboarding + embedded wallets |
 | Chain interaction | Viem + Wagmi | Type-safe, modern, fastest |
-| Account Abstraction | Safe{Core} + Permissionless.js | Battle-tested, ERC-4337 |
+| Account Abstraction | Safe{Core} + Permissionless.js | Post-MVP path, not current beta-critical |
 | Swap + Bridge | LI.FI SDK | Aggregates all DEXs + bridges in one call |
 | AI Agent | Claude claude-sonnet-4-5 + LangGraph | Reasoning + multi-turn memory |
 | Memory | Upstash Redis (short) + pgvector (long) | Fast context, persistent history |
 | Database | Supabase (PostgreSQL) | Realtime, RLS, managed |
 | Indexing | The Graph | Portfolio history, tx history |
 | Nodes | Alchemy | Reliable, webhooks, NFT API |
-| Notifications | Push Protocol | Decentralized, cross-device |
+| Notifications | Push Protocol | Candidate notification layer |
 | Contracts | Foundry | You already know it |
 | Primary Chain | Base | Low gas, growing ecosystem, Coinbase |
-| Automation | Chainlink Automation | Scheduled strategy execution |
+| Automation | Chainlink Automation | Future automation path, not current MVP |
 
 ---
 
@@ -123,38 +123,40 @@ forge test -vvv
 
 ---
 
-## Build Roadmap
+## Product Status
 
-### Phase 1 — Core Wallet (Months 1–2)
-- [ ] Privy embedded wallet + WalletConnect
-- [ ] Viem + Wagmi multichain setup
-- [ ] Real send/receive transactions
-- [ ] Expo working on iOS + Android
-- [ ] Basic portfolio view from Alchemy
+### Working Now
+- [x] Real Privy-backed web auth
+- [x] Real wallet balances, assets, NFTs, and activity
+- [x] Natural-language swap/send/bridge previews
+- [x] Real wallet-backed transaction execution
+- [x] Transaction submitted to confirmed lifecycle
+- [x] Strategy guardrails with backend persistence
+- [x] Auth hardening on agent, strategy, and tx routes
 
-### Phase 2 — The Agent (Months 3–4)
-- [ ] Claude API + LangGraph multi-turn memory
-- [ ] Natural language swap/send/bridge via LI.FI
-- [ ] Alchemy webhooks → Push Protocol notifications
-- [ ] Agent brief on wallet open (real data)
+### Current MVP Scope
+- [x] Web-first beta
+- [x] Base + Ethereum only
+- [x] Confirmation required before execution
+- [x] Assistive agent behavior, not unattended autonomy
 
-### Phase 3 — The Moat (Months 5–6)
-- [ ] ERC-4337 via Safe + Permissionless.js
-- [ ] Autonomous agent execution with guard rails
-- [ ] Arb scanner (from existing TypeScript bot)
-- [ ] Brickt pool integration
-
-### Phase 4 — Polish + Launch (Months 7–8)
+### Not On The Critical Beta Path
+- [ ] Full autonomous execution
+- [ ] ERC-4337 / Safe integration
 - [ ] Browser extension
-- [ ] Portfolio analytics (The Graph)
-- [ ] Transaction history screen
-- [ ] Agent config / guardrail UI
-- [ ] Beta launch
+- [ ] Mobile parity
+- [ ] Brickt integration
+- [ ] Fiat on-ramp
+- [ ] Broad multichain expansion
 
-### Phase 5 — On-ramp (Months 9+)
-- [ ] Yellow Card (NGN, GHS, KES)
-- [ ] Transak (global card on-ramp)
-- [ ] Local currency display
+### Launch Work Remaining
+- [ ] Analytics funnel instrumentation
+- [ ] Production error monitoring
+- [ ] Beta gating / feature flags for risky flows
+- [ ] Final staging regression pass
+- [ ] Known limitations and support runbook
+
+See [launch_execution_board.md](/home/mafita/amara/launch_execution_board.md) for the active Weeks 10-12 execution plan.
 
 ---
 
@@ -167,7 +169,7 @@ AnaraWallet.sol
 └── GuardRails     — Daily limits, per-trade caps, strategy toggles
 ```
 
-The agent is a registered module on the Safe-style wallet. It can execute swaps, bridges, and yield deposits autonomously — but the owner always holds the master key and can pause everything with `emergencyPause()`.
+This architecture section reflects a possible future contract path, not the current shipped MVP. The live beta path today is confirmation-based wallet execution from the connected user wallet.
 
 ---
 

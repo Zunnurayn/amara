@@ -1,85 +1,41 @@
- Concrete Implementation Plan (MVP end‑to‑end)
+## Implementation Plan
 
-  Status Update — 2026-03-31
+Status update: 2026-04-02
 
-  Completed phase: Web auth foundation
+This document is now a short status snapshot. The active execution board for launch work lives in [launch_execution_board.md](/home/mafita/amara/launch_execution_board.md).
 
-  Done
+## Current Product State
 
-  1. Real Privy-backed web auth replaced the demo local-storage flow.
-  2. Authenticated user bootstrap was added via /api/auth/sync.
-  3. Web wallet and agent requests now include the Privy identity token.
-  4. Wallet identity resolution now supports real Privy wallet fields.
-  5. Agent portfolio and price queries now use live Alchemy/CoinGecko reads.
+Implemented:
+- Real Privy-backed web auth
+- Real wallet portfolio, assets, NFTs, and activity on Base + Ethereum
+- Natural-language swap, send, and bridge previews
+- Real wallet-backed transaction execution with confirmation
+- Submitted to confirmed transaction lifecycle
+- Strategy guardrails with DB persistence
+- Auth hardening on agent, strategy, and transaction routes
+- Structured API logging
+- Basic API tests for authz, guardrails, and settings persistence
 
-  Next phase
+Current MVP position:
+- Web-first
+- Base + Ethereum only
+- Agent is assistive and confirmation-based
+- Mobile, extension, ERC-4337, and autonomous execution are not on the critical beta path
 
-  1. Replace mock send/swap/bridge previews with real quote-backed action cards.
-  2. Replace synthetic transaction execution with real simulate/execute plumbing.
+## What Is Still Open
 
-  Assumptions
+The remaining launch-critical work is no longer core wallet plumbing. It is:
+- analytics funnel instrumentation
+- production error monitoring
+- beta gating / feature flags for risky flows
+- final staging regression pass
+- known limitations and support runbook
 
-  1. Target MVP = usable web + mobile wallet with agent chat, real portfolio data, swap/bridge execution with
-     confirmation, and basic strategy toggles (no full automation yet).
-  2. Base + Ethereum are the first supported chains.
-  3. Supabase is the backend DB of record.
+## Source Of Truth
 
-  If any of these are wrong, tell me and I’ll adjust.
+Use:
+- [launch_execution_board.md](/home/mafita/amara/launch_execution_board.md) for Weeks 10-12 execution
+- [README.md](/home/mafita/amara/README.md) for current product overview and setup
 
-  Plan
-
-  1. Environment + Config
-     1.1 Create real env files for API, web, mobile.
-     Files: apps/api/.env, apps/web/.env.local, apps/mobile/.env
-     1.2 Standardize env names and validate at boot (throw early).
-     Files: apps/api/src/index.ts, packages/chain/src/chains.ts, packages/chain/src/privy.ts
-  2. Database Schema + API Wiring
-     2.1 Finalize Supabase schema for users, agent_settings, agent_executions, transactions, portfolio_snapshots.
-     File: apps/api/src/db/schema.sql
-     2.2 Wire /api/agent/brief to real agent_executions via getRecentExecutions.
-     File: apps/api/src/routes/agent.ts
-     2.3 Wire /api/wallet/:address/portfolio to real balances (Alchemy) and snapshot store.
-     Files: apps/api/src/routes/wallet.ts, apps/api/src/services/portfolio.ts (create if missing)
-     2.4 Wire /api/wallet/:address/transactions to The Graph or Alchemy history.
-     File: apps/api/src/routes/wallet.ts
-  3. Agent Core Hardening
-     3.1 Replace mock tool outputs with real LI.FI quotes and price feeds.
-     Files: packages/agent/src/tools/swap.ts, packages/agent/src/tools/bridge.ts, packages/agent/src/tools/portfolio.ts
-     3.2 Add confidence gating: if parser confidence < threshold, ask clarification.
-     File: packages/agent/src/graph.ts
-     3.3 Persist conversation memory to Redis (short) + Postgres (long).
-     File: packages/agent/src/memory/index.ts
-     3.4 Add address + balance validations to prevent invalid executes.
-     File: packages/agent/src/graph.ts
-  4. Transaction Execution Pipeline
-     4.1 Add /api/tx/simulate integration with Tenderly.
-     File: apps/api/src/routes/transactions.ts
-     4.2 Add /api/tx/broadcast integration with Alchemy.
-     File: apps/api/src/routes/transactions.ts
-     4.3 Create execution endpoint that consumes actionCard + signature and executes swap/bridge.
-     Files: apps/api/src/routes/transactions.ts, packages/chain/src/lifi.ts
-  5. Web UI: Real Data + Agent Chat
-     5.1 Connect wallet state to API (portfolio, tx history).
-     Files: apps/web/src/store/index.ts, apps/web/src/app/dashboard/page.tsx
-     5.2 Add agent chat panel route and hook to /api/agent/chat.
-     Files: apps/web/src/app/dashboard/page.tsx, apps/web/src/hooks/useAgent.ts
-     5.3 Render actionCard in chat UI with confirm/cancel.
-     Files: apps/web/src/app/dashboard/page.tsx, packages/ui/src/components/index.tsx
-  6. Mobile UI: Parity
-     6.1 Mirror web data fetching and chat confirmation UX.
-     Files: apps/mobile/src/hooks/useAgent.ts, apps/mobile/src/store/index.ts, apps/mobile/src/app/chat.tsx
-  7. Contracts + Wallet Execution
-     7.1 Keep AnaraWallet.sol as v1 scaffold; add minimal deploy script + tests.
-     Files: apps/contracts/src/AnaraWallet.sol, apps/contracts/test/AnaraWallet.t.sol
-     7.2 When ready, integrate Safe/Permissionless for ERC‑4337 (post‑MVP).
-  8. Observability + Guardrails
-     8.2 Add strategy toggle persistence in DB.
-     Files: apps/api/src/routes/strategy.ts, apps/api/src/db/client.ts
-  9. QA + Release
-     Commands: pnpm typecheck, pnpm --filter @anara/web build, pnpm --filter @anara/mobile typecheck
-
-  Suggested Build Order (fastest path to demo)
-  3. Step 4 (tx execution)
-  4. Step 6 (mobile parity)
-  5. Step 8–9 (hardening + release)
-  schema + Step 2.2 brief wiring”).
+Do not use older roadmap assumptions in prior drafts as the source of truth anymore.
