@@ -1,10 +1,16 @@
 import { Router } from 'express'
 import { z } from 'zod'
 import { erc20Abi, getAddress, isAddress, zeroAddress } from 'viem'
-import { getUserByWalletAddress, logExecution, saveTransaction, updateTransactionStatus } from '../db/client'
+import { getAgentSettings, getUserByPrivyId, getUserByWalletAddress, logExecution, saveTransaction, updateTransactionStatus, upsertUser } from '../db/client'
 import { getPublicClient } from '@anara/chain'
+import { requireAuth, type AuthenticatedRequest } from '../middleware/auth'
+import { getAuthorizedWalletAddress, isAuthorizationError } from '../lib/authz'
+import { evaluateGuardrails } from '../lib/guardrails'
+import { logErrorEvent, logEvent, logWarn } from '../middleware/logger'
 
 export const txRouter = Router()
+
+txRouter.use(['/simulate', '/broadcast', '/execute'], requireAuth)
 
 const ActionMetadataSchema = z.object({
   kind: z.enum(['swap', 'bridge', 'send']),
@@ -56,21 +62,33 @@ const ExecuteSchema = z.object({
   actionCard: ActionCardSchema,
 })
 
-txRouter.post('/simulate', async (req, res) => {
+txRouter.post('/simulate', async (req: AuthenticatedRequest, res) => {
   try {
     const body = SimulateSchema.parse(req.body)
+    const walletAddress = getAuthorizedWalletAddress(req.walletAddress, body.walletAddress)
+    logEvent('tx_simulation_requested', {
+      userId: req.userId,
+      walletAddress,
+      chainId: body.chainId,
+      actionType: body.actionCard?.type ?? null,
+      actionKind: body.actionCard?.metadata?.kind ?? null,
+    })
     const analysis = summarizeAction(body.actionCard)
     const metadata = body.actionCard?.metadata
-    const balanceCheck = await getBalanceCheck(body.walletAddress, metadata, body.chainId)
+    const balanceCheck = await getBalanceCheck(walletAddress, metadata, body.chainId)
+    const user = await getOrCreateAuthenticatedUser(req)
+    const settings = await getAgentSettings(user.id)
+    const guardrailCheck = evaluateGuardrails(body.actionCard?.type, analysis.estimatedUsd, settings)
     const warnings = [
       ...analysis.warnings,
       ...(balanceCheck.warning ? [balanceCheck.warning] : []),
+      ...(guardrailCheck.warning ? [guardrailCheck.warning] : []),
     ]
 
     res.json({
       success: true,
       chainId: body.chainId,
-      willSucceed: canSimulate(body.actionCard) && balanceCheck.sufficient,
+      willSucceed: canSimulate(body.actionCard) && balanceCheck.sufficient && guardrailCheck.allowed,
       gasEstimateUsd: analysis.gasEstimateUsd,
       estimatedRoute: analysis.route,
       warnings,
@@ -79,43 +97,118 @@ txRouter.post('/simulate', async (req, res) => {
       estimatedFeeUsd: formatUsd(metadata?.estimatedFeeUsd),
       balance: balanceCheck.summary,
     })
+    logEvent('tx_simulation_completed', {
+      userId: req.userId,
+      walletAddress,
+      chainId: body.chainId,
+      actionType: body.actionCard?.type ?? null,
+      willSucceed: canSimulate(body.actionCard) && balanceCheck.sufficient && guardrailCheck.allowed,
+      warningCount: warnings.length,
+    })
   } catch (err) {
     if (err instanceof z.ZodError) {
+      logWarn('tx_simulation_invalid', {
+        userId: req.userId,
+        details: err.errors,
+      })
       return res.status(400).json({ error: 'Invalid simulation payload', details: err.errors })
     }
+    if (err instanceof Error && isAuthorizationError(err)) {
+      logWarn('tx_simulation_forbidden', {
+        userId: req.userId,
+        message: err.message,
+      })
+      return res.status(403).json({ error: err.message })
+    }
+    logErrorEvent('tx_simulation_failed', {
+      userId: req.userId,
+      message: err instanceof Error ? err.message : String(err),
+    })
     return res.status(500).json({ error: 'Simulation unavailable' })
   }
 })
 
-txRouter.post('/broadcast', async (req, res) => {
+txRouter.post('/broadcast', async (req: AuthenticatedRequest, res) => {
   try {
     const body = ExecuteSchema.parse(req.body)
-    const txHash = (body.txHash as `0x${string}` | undefined) ?? makeTxHash(body.walletAddress, getExecutionSalt(body.actionCard))
+    const walletAddress = getAuthorizedWalletAddress(req.walletAddress, body.walletAddress)
+    const txHash = (body.txHash as `0x${string}` | undefined) ?? makeTxHash(walletAddress, getExecutionSalt(body.actionCard))
+    logEvent('tx_broadcast_requested', {
+      userId: req.userId,
+      walletAddress,
+      chainId: body.chainId,
+      actionType: body.actionCard.type,
+      txHash,
+    })
 
-    await persistExecution(body.walletAddress, body.chainId, body.actionCard, txHash, body.executionStatus ?? 'pending')
+    await persistExecution(walletAddress, req.userId!, body.chainId, body.actionCard, txHash, body.executionStatus ?? 'pending')
 
     res.json({
       hash: txHash,
       status: body.executionStatus ?? 'pending',
       explorerUrl: body.explorerUrl ?? getExplorerUrl(body.chainId, txHash),
     })
+    logEvent('tx_broadcast_completed', {
+      userId: req.userId,
+      walletAddress,
+      chainId: body.chainId,
+      actionType: body.actionCard.type,
+      txHash,
+      status: body.executionStatus ?? 'pending',
+    })
   } catch (err) {
     if (err instanceof z.ZodError) {
+      logWarn('tx_broadcast_invalid', {
+        userId: req.userId,
+        details: err.errors,
+      })
       return res.status(400).json({ error: 'Invalid broadcast payload', details: err.errors })
     }
+    if (err instanceof Error && isAuthorizationError(err)) {
+      logWarn('tx_broadcast_forbidden', {
+        userId: req.userId,
+        message: err.message,
+      })
+      return res.status(403).json({ error: err.message })
+    }
+    logErrorEvent('tx_broadcast_failed', {
+      userId: req.userId,
+      message: err instanceof Error ? err.message : String(err),
+    })
     return res.status(500).json({ error: 'Broadcast unavailable' })
   }
 })
 
-txRouter.post('/execute', async (req, res) => {
+txRouter.post('/execute', async (req: AuthenticatedRequest, res) => {
   try {
     const body = ExecuteSchema.parse(req.body)
-    const txHash = (body.txHash as `0x${string}` | undefined) ?? makeTxHash(body.walletAddress, getExecutionSalt(body.actionCard))
-    const metadata = body.actionCard.metadata
+    const walletAddress = getAuthorizedWalletAddress(req.walletAddress, body.walletAddress)
+    logEvent('tx_execute_requested', {
+      userId: req.userId,
+      walletAddress,
+      chainId: body.chainId,
+      actionType: body.actionCard.type,
+      routeId: body.actionCard.metadata?.routeId ?? null,
+      providedTxHash: body.txHash ?? null,
+    })
+    const user = await getOrCreateAuthenticatedUser(req)
+    const settings = await getAgentSettings(user.id)
     const analysis = summarizeAction(body.actionCard)
+    const guardrailCheck = evaluateGuardrails(body.actionCard?.type, analysis.estimatedUsd, settings)
+    if (!guardrailCheck.allowed) {
+      logWarn('tx_execute_blocked', {
+        userId: req.userId,
+        walletAddress,
+        chainId: body.chainId,
+        actionType: body.actionCard.type,
+        reason: guardrailCheck.warning ?? 'blocked',
+      })
+      return res.status(403).json({ error: guardrailCheck.warning ?? 'This action is blocked by strategy settings.' })
+    }
+    const txHash = (body.txHash as `0x${string}` | undefined) ?? makeTxHash(walletAddress, getExecutionSalt(body.actionCard))
+    const metadata = body.actionCard.metadata
     const status = body.executionStatus ?? 'pending'
-
-    await persistExecution(body.walletAddress, body.chainId, body.actionCard, txHash, status)
+    await persistExecution(walletAddress, req.userId!, body.chainId, body.actionCard, txHash, status)
 
     res.json({
       success: true,
@@ -136,10 +229,34 @@ txRouter.post('/execute', async (req, res) => {
         txHash,
       },
     })
+    logEvent('tx_execute_completed', {
+      userId: req.userId,
+      walletAddress,
+      chainId: body.chainId,
+      actionType: body.actionCard.type,
+      txHash,
+      status,
+      executionMode: body.txHash ? 'wallet-submitted' : metadata?.routeId ? 'quote-backed-preview' : 'preview-only',
+    })
   } catch (err) {
     if (err instanceof z.ZodError) {
+      logWarn('tx_execute_invalid', {
+        userId: req.userId,
+        details: err.errors,
+      })
       return res.status(400).json({ error: 'Invalid execution payload', details: err.errors })
     }
+    if (err instanceof Error && isAuthorizationError(err)) {
+      logWarn('tx_execute_forbidden', {
+        userId: req.userId,
+        message: err.message,
+      })
+      return res.status(403).json({ error: err.message })
+    }
+    logErrorEvent('tx_execute_failed', {
+      userId: req.userId,
+      message: err instanceof Error ? err.message : String(err),
+    })
     return res.status(500).json({ error: 'Execution unavailable' })
   }
 })
@@ -156,6 +273,12 @@ txRouter.get('/status/:chainId/:txHash', async (req, res) => {
     const receipt = await client.getTransactionReceipt({ hash: txHash })
     const status = receipt.status === 'success' ? 'confirmed' : 'failed'
     await updateTransactionStatus(txHash, chainId, status)
+    logEvent('tx_status_resolved', {
+      chainId,
+      txHash,
+      status,
+      blockNumber: Number(receipt.blockNumber),
+    })
 
     return res.json({
       hash: txHash,
@@ -165,6 +288,11 @@ txRouter.get('/status/:chainId/:txHash', async (req, res) => {
       explorerUrl: getExplorerUrl(chainId, txHash),
     })
   } catch (err) {
+    logWarn('tx_status_pending', {
+      chainId: Number(req.params.chainId),
+      txHash: req.params.txHash,
+      message: err instanceof Error ? err.message : String(err),
+    })
     return res.json({
       hash: req.params.txHash,
       chainId: Number(req.params.chainId),
@@ -176,12 +304,15 @@ txRouter.get('/status/:chainId/:txHash', async (req, res) => {
 
 async function persistExecution(
   walletAddress: string,
+  privyUserId: string,
   chainId: number,
   actionCard: z.infer<typeof ActionCardSchema>,
   txHash: `0x${string}`,
   status: 'pending' | 'confirmed'
 ) {
-  const user = await getUserByWalletAddress(walletAddress)
+  const user =
+    await getUserByWalletAddress(walletAddress) ??
+    await upsertUser(privyUserId, walletAddress)
   const type = normalizeType(actionCard.type)
   const summary = summarizeAction(actionCard)
 
@@ -227,6 +358,17 @@ async function persistExecution(
   }
 }
 
+async function getOrCreateAuthenticatedUser(req: AuthenticatedRequest) {
+  const existing = req.userId ? await getUserByPrivyId(req.userId) : null
+  if (existing) return existing
+
+  const created = await upsertUser(req.userId!, req.walletAddress)
+  if (!created) {
+    throw new Error('Authenticated user could not be resolved')
+  }
+  return created
+}
+
 async function getBalanceCheck(
   walletAddress: string,
   metadata: z.infer<typeof ActionMetadataSchema> | undefined,
@@ -241,15 +383,23 @@ async function getBalanceCheck(
 
   try {
     const isNative = !metadata.fromTokenAddress || metadata.fromTokenAddress === zeroAddress
+    const tokenAddress = metadata.fromTokenAddress
+    if (!isNative && !tokenAddress) {
+      throw new Error('Route is missing token address.')
+    }
     const requiredRaw = BigInt(metadata.fromAmount)
-    const balanceRaw = isNative
-      ? await client.getBalance({ address: getAddress(walletAddress) })
-      : await client.readContract({
-          address: getAddress(metadata.fromTokenAddress),
-          abi: erc20Abi,
-          functionName: 'balanceOf',
-          args: [getAddress(walletAddress)],
-        })
+    let balanceRaw: bigint
+    if (isNative) {
+      balanceRaw = await client.getBalance({ address: getAddress(walletAddress) })
+    } else {
+      const erc20Address = tokenAddress!
+      balanceRaw = await client.readContract({
+        address: getAddress(erc20Address),
+        abi: erc20Abi,
+        functionName: 'balanceOf',
+        args: [getAddress(walletAddress)],
+      })
+    }
 
     const sufficient = balanceRaw >= requiredRaw
     const decimals = metadata.fromTokenDecimals ?? (isNative ? 18 : 18)

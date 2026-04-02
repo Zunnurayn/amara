@@ -1,6 +1,13 @@
 import { create } from 'zustand'
 import { persist, createJSONStorage, type StateStorage } from 'zustand/middleware'
-import type { AgentMessage, AgentState, TokenBalance, Transaction } from '@anara/types'
+import type {
+  AgentMessage,
+  AgentState,
+  TokenBalance,
+  Transaction,
+  WalletChainSummary,
+  WalletNftSummary,
+} from '@anara/types'
 
 export interface BriefSummary {
   summary: string
@@ -18,6 +25,8 @@ interface WalletStore {
   chainId:      number
   totalUsd:     string
   tokens:       TokenBalance[]
+  nfts:         WalletNftSummary[]
+  chains:       WalletChainSummary[]
   transactions: Transaction[]
   isLoading:    boolean
   error:        string | null
@@ -25,7 +34,13 @@ interface WalletStore {
   setAddress:   (address: string | null) => void
   setHasWallet: (hasWallet: boolean) => void
   setChainId:   (chainId: number) => void
-  setPortfolio: (data: { totalUsd: string; tokens: TokenBalance[]; lastUpdated?: number }) => void
+  setPortfolio: (data: {
+    totalUsd: string
+    tokens: TokenBalance[]
+    nfts?: WalletNftSummary[]
+    chains?: WalletChainSummary[]
+    lastUpdated?: number
+  }) => void
   setTransactions: (transactions: Transaction[]) => void
   setLoading:   (loading: boolean) => void
   setError:     (error: string | null) => void
@@ -39,6 +54,8 @@ export const useWalletStore = create<WalletStore>()(
       chainId:      8453,
       totalUsd:     '$0.00',
       tokens:       [],
+      nfts:         [],
+      chains:       [],
       transactions: [],
       isLoading:    false,
       error:        null,

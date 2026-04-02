@@ -1,5 +1,9 @@
 import type { Request, Response, NextFunction } from 'express'
 
+type LogLevel = 'info' | 'warn' | 'error'
+
+type LogFields = Record<string, unknown>
+
 // ── Request Logger ──────────────────────────────────────────────
 export function requestLogger(req: Request, _res: Response, next: NextFunction) {
   const start = Date.now()
@@ -10,6 +14,18 @@ export function requestLogger(req: Request, _res: Response, next: NextFunction) 
     console.log(`${color}${req.method}\x1b[0m ${req.path} ${status} — ${ms}ms`)
   })
   next()
+}
+
+export function logEvent(event: string, fields: LogFields = {}) {
+  writeStructuredLog('info', event, fields)
+}
+
+export function logWarn(event: string, fields: LogFields = {}) {
+  writeStructuredLog('warn', event, fields)
+}
+
+export function logErrorEvent(event: string, fields: LogFields = {}) {
+  writeStructuredLog('error', event, fields)
 }
 
 // ── Global Error Handler ────────────────────────────────────────
@@ -40,4 +56,23 @@ export function notFound(req: Request, res: Response) {
   res.status(404).json({
     error: `Route not found: ${req.method} ${req.path}`,
   })
+}
+
+function writeStructuredLog(level: LogLevel, event: string, fields: LogFields) {
+  const payload = {
+    level,
+    event,
+    timestamp: new Date().toISOString(),
+    ...fields,
+  }
+
+  if (level === 'error') {
+    console.error(JSON.stringify(payload))
+    return
+  }
+  if (level === 'warn') {
+    console.warn(JSON.stringify(payload))
+    return
+  }
+  console.log(JSON.stringify(payload))
 }

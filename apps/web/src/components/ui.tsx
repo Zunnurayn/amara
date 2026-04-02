@@ -221,10 +221,12 @@ export function ActionCard({
   }
   const accent = actionCardAccent[card.type] ?? colors.gold
   const icon = actionCardIcons[card.type] ?? '◆'
-  const done = card.status === 'confirmed' || card.status === 'failed' || card.status === 'cancelled'
+  const done = card.status === 'submitted' || card.status === 'confirmed' || card.status === 'failed' || card.status === 'cancelled'
   const badgeVariant =
     card.status === 'pending'
       ? 'watching'
+      : card.status === 'submitted'
+        ? 'watching'
       : card.status === 'confirmed'
         ? 'active'
         : card.status === 'failed'
@@ -238,7 +240,7 @@ export function ActionCard({
         <span className="text-base">{icon}</span>
         <span className="text-[10px] font-bold uppercase tracking-wider text-text2">{card.title}</span>
         <Badge variant={badgeVariant} className="ml-auto">
-          {card.status === 'executing' ? '⟳ Executing' : card.status.toUpperCase()}
+          {card.status === 'executing' ? '⟳ Executing' : card.status === 'submitted' ? 'SUBMITTED' : card.status.toUpperCase()}
         </Badge>
       </div>
       <div className="divide-y divide-border/50 px-3">
@@ -274,6 +276,13 @@ export function ActionCard({
         <div className="flex items-center gap-2 px-3 py-3">
           <div className="h-4 w-4 animate-spin rounded-full border-2 border-t-transparent" style={{ borderColor: accent, borderTopColor: 'transparent' }} />
           <span className="text-[11px] text-muted">Processing on-chain…</span>
+        </div>
+      )}
+      {card.status === 'submitted' && (
+        <div className="flex items-center gap-2 px-3 py-3 text-gold2">
+          <span>↗</span>
+          <span className="text-[11px] font-bold">Submitted, awaiting confirmation</span>
+          {card.txHash && <span className="ml-auto text-[9px] font-mono text-muted">{card.txHash.slice(0, 10)}…{card.txHash.slice(-4)}</span>}
         </div>
       )}
       {card.status === 'confirmed' && (

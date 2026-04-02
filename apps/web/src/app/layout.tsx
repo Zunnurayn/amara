@@ -3,15 +3,15 @@ import { Providers } from './providers'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title:       'Anara Wallet — Autonomous Multichain',
-  description: 'The world\'s first autonomous multichain wallet. Agent-powered DeFi for everyone.',
+  title:       'Anara Wallet — AI-Assisted Base + Ethereum Wallet',
+  description: 'AI-assisted wallet for Base and Ethereum. Review route previews, confirm execution, and track wallet activity.',
   icons: {
     icon:  '/anara-icon.svg',
     apple: '/anara-icon.svg',
   },
   openGraph: {
     title:       'Anara Wallet',
-    description: 'Autonomous multichain wallet. Your agent works while you sleep.',
+    description: 'AI-assisted wallet for Base and Ethereum with confirmation-based execution.',
     images:      ['/anara-logo.svg'],
   },
 }

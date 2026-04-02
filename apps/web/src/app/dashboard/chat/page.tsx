@@ -72,6 +72,10 @@ export default function DashboardChatPage() {
           </div>
         )}
 
+        <div className="bg-soil border border-border px-4 py-3 text-xs text-muted leading-5">
+          Anara prepares previews and submits transactions only after your confirmation. Network fees, slippage, bridge delays, and external protocol failures can still affect outcomes.
+        </div>
+
         {messages.length === 0 && (
           <div className="bg-soil border border-border p-4">
             <div className="text-sm leading-6">
@@ -106,8 +110,8 @@ export default function DashboardChatPage() {
               )}
               <div className={message.role === 'user'
                 ? 'bg-gold text-earth px-4 py-3 text-sm'
-                : 'bg-soil border border-border px-4 py-3 text-sm leading-6'}>
-                {message.content}
+                : 'bg-soil border border-border px-4 py-3 text-sm leading-6 break-words overflow-hidden'}>
+                <MessageBody content={message.content} />
               </div>
               <div className={`mt-1 text-[10px] font-mono text-muted ${message.role === 'user' ? 'text-right' : 'text-left'}`}>
                 {new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
@@ -141,4 +145,56 @@ export default function DashboardChatPage() {
       </div>
     </div>
   )
+}
+
+function MessageBody({ content }: { content: string }) {
+  const executionSummary = parseExecutionSummary(content)
+
+  if (executionSummary) {
+    return (
+      <div className="space-y-3">
+        <div className="text-sm font-semibold text-cream">Execution submitted and awaiting confirmation.</div>
+        <div className="grid gap-2 text-[12px]">
+          {executionSummary.route && <SummaryRow label="Route" value={executionSummary.route} />}
+          {executionSummary.gas && <SummaryRow label="Estimated gas" value={executionSummary.gas} />}
+          {executionSummary.tx && <SummaryRow label="Tx" value={executionSummary.tx} mono />}
+        </div>
+        {executionSummary.explorerUrl && (
+          <a
+            href={executionSummary.explorerUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center border border-border px-3 py-2 text-[11px] font-bold uppercase tracking-wide text-gold2 hover:border-gold/40"
+          >
+            View On Explorer
+          </a>
+        )}
+      </div>
+    )
+  }
+
+  return <div className="whitespace-pre-wrap break-words">{content}</div>
+}
+
+function SummaryRow({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
+  return (
+    <div className="flex items-start justify-between gap-3 border-b border-border/40 pb-2 last:border-b-0 last:pb-0">
+      <span className="text-muted">{label}</span>
+      <span className={mono ? 'font-mono text-right text-text2' : 'text-right text-text2'}>{value}</span>
+    </div>
+  )
+}
+
+function parseExecutionSummary(content: string) {
+  if (!content.startsWith('Execution submitted and awaiting confirmation.')) {
+    return null
+  }
+
+  const lines = content.split('\n').map((line) => line.trim()).filter(Boolean)
+  return {
+    route: lines.find((line) => line.startsWith('Route: '))?.replace('Route: ', '') ?? null,
+    gas: lines.find((line) => line.startsWith('Estimated gas: '))?.replace('Estimated gas: ', '') ?? null,
+    tx: lines.find((line) => line.startsWith('Tx: '))?.replace('Tx: ', '') ?? null,
+    explorerUrl: lines.find((line) => line.startsWith('Explorer: '))?.replace('Explorer: ', '') ?? null,
+  }
 }

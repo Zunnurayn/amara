@@ -4,47 +4,81 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { Badge, Button, Card, KenteStrip } from '../../../../components/ui'
-import { useWalletStore } from '../../../../store'
 import { useAuth } from '../../../../lib/auth'
 import { resolveWalletIdentity } from '../../../../lib/wallet'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000'
 
+type StrategySettings = {
+  autoExecute: boolean
+  executionCapUsd: number
+  allowSwaps: boolean
+  allowBridges: boolean
+  allowSends: boolean
+  arbEnabled: boolean
+  yieldEnabled: boolean
+  rebalanceEnabled: boolean
+  bricktEnabled: boolean
+  updatedAt?: string
+}
+
+type StrategyResponse = {
+  id: string
+  name: string
+  status: string
+  type: string
+  pnl: string
+  settings: StrategySettings
+  details: Record<string, string | number | boolean>
+}
+
 export default function StrategyDetailPage() {
   const params = useParams<{ id: string }>()
   const strategyId = params.id
   const apiStrategyId = strategyId === 'reb' ? 'rebalance' : strategyId
-  const { ready, authenticated, user } = useAuth()
-  const walletAddress = useWalletStore((state) => state.address)
-  const setAddress = useWalletStore((state) => state.setAddress)
-  const setHasWallet = useWalletStore((state) => state.setHasWallet)
+  const { ready, authenticated, user, identityToken } = useAuth()
 
-  const [strategy, setStrategy] = useState<Record<string, unknown> | null>(null)
+  const [strategy, setStrategy] = useState<StrategyResponse | null>(null)
+  const [settings, setSettings] = useState<StrategySettings | null>(null)
+  const [thresholdInput, setThresholdInput] = useState('')
   const [isLoading, setIsLoading] = useState(true)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const walletIdentity = resolveWalletIdentity(user)
 
   useEffect(() => {
-    if (!ready || !authenticated) return
-    const { address, hasWallet } = resolveWalletIdentity(user)
-    setHasWallet(hasWallet)
-    if (address) setAddress(address)
-  }, [ready, authenticated, user, setAddress, setHasWallet])
-
-  useEffect(() => {
+    if (!ready) return
+    if (!authenticated) {
+      setIsLoading(false)
+      return
+    }
+    if (!identityToken) {
+      setIsLoading(false)
+      return
+    }
     let mounted = true
 
     async function load() {
       setIsLoading(true)
       setError(null)
       try {
-        const res = await fetch(`${API_URL}/api/strategy/${apiStrategyId}`)
+        const res = await fetch(`${API_URL}/api/strategy/${apiStrategyId}`, {
+          headers: {
+            Authorization: `Bearer ${identityToken}`,
+          },
+        })
         if (!res.ok) throw new Error(`Failed to load strategy ${apiStrategyId}`)
-        const data = await res.json()
-        if (mounted) setStrategy(data)
+        const data = await res.json() as StrategyResponse
+        if (mounted) {
+          setStrategy(data)
+          setSettings(data.settings)
+          setThresholdInput(String(data.settings.executionCapUsd ?? ''))
+        }
       } catch (err) {
         if (mounted) {
           setStrategy(null)
+          setSettings(null)
+          setThresholdInput('')
           setError(err instanceof Error ? err.message : 'Strategy unavailable')
         }
       } finally {
@@ -56,23 +90,30 @@ export default function StrategyDetailPage() {
     return () => {
       mounted = false
     }
-  }, [apiStrategyId])
+  }, [apiStrategyId, authenticated, identityToken, ready])
 
   async function toggle(action: 'pause' | 'resume') {
+    if (!identityToken) return
     setIsSubmitting(true)
     setError(null)
     try {
       const res = await fetch(`${API_URL}/api/strategy/${apiStrategyId}/toggle`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action, walletAddress }),
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${identityToken}`,
+        },
+        body: JSON.stringify({ action }),
       })
       if (!res.ok) throw new Error('Failed to update strategy')
       const data = await res.json()
       setStrategy((current) => ({
         ...(current ?? {}),
         status: data.newStatus ?? (current?.status ?? 'active'),
-      }))
+      } as StrategyResponse))
+      if (data.settings) {
+        setSettings(data.settings)
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to update strategy')
     } finally {
@@ -80,7 +121,45 @@ export default function StrategyDetailPage() {
     }
   }
 
-  const status = String(strategy?.status ?? 'unknown')
+  async function saveSettings() {
+    if (!identityToken || !settings) return
+    setIsSubmitting(true)
+    setError(null)
+    try {
+      const nextThreshold = Number(thresholdInput)
+      if (!thresholdInput.trim() || !Number.isFinite(nextThreshold) || nextThreshold < 0) {
+        throw new Error('Enter a valid approval threshold.')
+      }
+      const res = await fetch(`${API_URL}/api/strategy/settings`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${identityToken}`,
+        },
+        body: JSON.stringify({
+          autoExecute: settings.autoExecute,
+          requireApprovalAbove: nextThreshold,
+          allowSwaps: settings.allowSwaps,
+          allowBridges: settings.allowBridges,
+          allowSends: settings.allowSends,
+        }),
+      })
+      if (!res.ok) throw new Error('Failed to save strategy settings')
+      const data = await res.json()
+      if (data.settings) {
+        setSettings(data.settings)
+        setThresholdInput(String(data.settings.executionCapUsd ?? ''))
+        setStrategy((current) => current ? { ...current, settings: data.settings } : current)
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save strategy settings')
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  const status = strategy?.status ?? 'unknown'
+  const isAwaitingSession = ready && authenticated && !identityToken
 
   return (
     <div className="min-h-screen bg-earth text-cream">
@@ -106,11 +185,24 @@ export default function StrategyDetailPage() {
             </div>
 
             {isLoading && <p className="text-sm text-muted">Loading strategy state…</p>}
+            {!isLoading && isAwaitingSession && <p className="text-sm text-muted">Waiting for authenticated session…</p>}
             {!isLoading && error && <p className="text-sm text-kola">{error}</p>}
 
             {!isLoading && strategy && (
               <div className="space-y-3 text-sm">
-                {Object.entries(strategy).map(([key, value]) => (
+                <div className="flex items-center justify-between border-b border-border/50 pb-2">
+                  <span className="text-muted">Name</span>
+                  <span className="font-mono text-text2">{strategy.name}</span>
+                </div>
+                <div className="flex items-center justify-between border-b border-border/50 pb-2">
+                  <span className="text-muted">Type</span>
+                  <span className="font-mono text-text2">{strategy.type}</span>
+                </div>
+                <div className="flex items-center justify-between border-b border-border/50 pb-2">
+                  <span className="text-muted">Performance</span>
+                  <span className="font-mono text-text2">{strategy.pnl}</span>
+                </div>
+                {Object.entries(strategy.details ?? {}).map(([key, value]) => (
                   <div key={key} className="flex items-center justify-between border-b border-border/50 pb-2">
                     <span className="text-muted capitalize">{key.replace(/_/g, ' ')}</span>
                     <span className="font-mono text-text2">{String(value)}</span>
@@ -125,11 +217,92 @@ export default function StrategyDetailPage() {
           </div>
         </Card>
 
+        <Card className="mb-4">
+          <div className="p-5 space-y-4">
+            <div>
+              <div className="text-[10px] tracking-[0.2em] uppercase text-muted font-bold">Guardrails</div>
+              <div className="mt-1 text-sm text-muted">
+                These settings are persisted server-side for {walletIdentity.address ? `${walletIdentity.address.slice(0, 6)}…${walletIdentity.address.slice(-4)}` : 'your wallet'}.
+              </div>
+            </div>
+
+            <label className="flex items-center justify-between gap-4">
+              <div>
+                <div className="text-sm font-semibold text-text2">Future auto-actions (beta)</div>
+                <div className="text-xs text-muted">Stores your preference for later. The current MVP still requires explicit confirmation before execution.</div>
+              </div>
+              <input
+                type="checkbox"
+                className="h-4 w-4 accent-[#D4920A]"
+                checked={settings?.autoExecute ?? false}
+                disabled={!settings || isLoading || isAwaitingSession}
+                onChange={(event) => setSettings((current) => current ? { ...current, autoExecute: event.target.checked } : current)}
+              />
+            </label>
+
+            <div className="grid gap-3 md:grid-cols-3">
+              <label className="flex items-center justify-between gap-3 border border-border/60 bg-clay px-3 py-2">
+                <span className="text-sm font-semibold text-text2">Allow swaps</span>
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 accent-[#D4920A]"
+                  checked={settings?.allowSwaps ?? false}
+                  disabled={!settings || isLoading || isAwaitingSession}
+                  onChange={(event) => setSettings((current) => current ? { ...current, allowSwaps: event.target.checked } : current)}
+                />
+              </label>
+              <label className="flex items-center justify-between gap-3 border border-border/60 bg-clay px-3 py-2">
+                <span className="text-sm font-semibold text-text2">Allow bridges</span>
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 accent-[#D4920A]"
+                  checked={settings?.allowBridges ?? false}
+                  disabled={!settings || isLoading || isAwaitingSession}
+                  onChange={(event) => setSettings((current) => current ? { ...current, allowBridges: event.target.checked } : current)}
+                />
+              </label>
+              <label className="flex items-center justify-between gap-3 border border-border/60 bg-clay px-3 py-2">
+                <span className="text-sm font-semibold text-text2">Allow sends</span>
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 accent-[#D4920A]"
+                  checked={settings?.allowSends ?? false}
+                  disabled={!settings || isLoading || isAwaitingSession}
+                  onChange={(event) => setSettings((current) => current ? { ...current, allowSends: event.target.checked } : current)}
+                />
+              </label>
+            </div>
+
+            <label className="block">
+              <div className="text-sm font-semibold text-text2">Execution cap (USD)</div>
+              <div className="text-xs text-muted mb-2">Actions above this cap are blocked until you raise it.</div>
+              <input
+                type="number"
+                min={0}
+                step="1"
+                value={thresholdInput}
+                disabled={!settings || isLoading || isAwaitingSession}
+                onChange={(event) => setThresholdInput(event.target.value)}
+                className="w-full bg-clay border border-border px-3 py-2 text-sm text-text2 outline-none focus:border-gold2"
+              />
+            </label>
+
+            <Button
+              variant="primary"
+              loading={isSubmitting}
+              disabled={isSubmitting || !settings || isLoading || isAwaitingSession}
+              onClick={saveSettings}
+            >
+              Save guardrails
+            </Button>
+          </div>
+        </Card>
+
         <div className="flex gap-3">
           <Button
             variant="primary"
             loading={isSubmitting}
-            disabled={isSubmitting || status === 'active' || !walletAddress}
+            disabled={isSubmitting || status === 'active' || !walletIdentity.address || isLoading || isAwaitingSession}
             onClick={() => toggle('resume')}
           >
             Resume
@@ -137,7 +310,7 @@ export default function StrategyDetailPage() {
           <Button
             variant="secondary"
             loading={isSubmitting}
-            disabled={isSubmitting || status === 'paused' || !walletAddress}
+            disabled={isSubmitting || status === 'paused' || !walletIdentity.address || isLoading || isAwaitingSession}
             onClick={() => toggle('pause')}
           >
             Pause

@@ -33,6 +33,34 @@ export interface NftSummary {
 
 const MAX_TOKENS_PER_CHAIN = 30
 
+function hasUsableAlchemyKey() {
+  const key = process.env.ALCHEMY_API_KEY?.trim()
+  return Boolean(key && key !== 'xxxxxx')
+}
+
+function formatProviderError(reason: unknown) {
+  if (reason instanceof Error) return reason.message
+  return String(reason)
+}
+
+async function parseJsonResponse(response: Response) {
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`)
+  }
+  return await response.json() as any
+}
+
+function ensureRpcResult(data: any, label: string) {
+  if (data?.error) {
+    const message = typeof data.error?.message === 'string' ? data.error.message : 'Unknown RPC error'
+    throw new Error(`${label}: ${message}`)
+  }
+  if (typeof data?.result === 'undefined') {
+    throw new Error(`${label}: missing result`)
+  }
+  return data.result
+}
+
 // ── Get token balances (Alchemy) ──────────────────────────────────
 export async function getTokenBalances(address: string, chainId: number) {
   const url = chainId === 8453 ? ALCHEMY_BASE_URL : ALCHEMY_ETH_URL
@@ -48,8 +76,9 @@ export async function getTokenBalances(address: string, chainId: number) {
     }),
   })
 
-  const data = await res.json() as any
-  return (data.result?.tokenBalances ?? []) as TokenBalance[]
+  const data = await parseJsonResponse(res)
+  const result = ensureRpcResult(data, `alchemy_getTokenBalances(${chainId})`)
+  return (result.tokenBalances ?? []) as TokenBalance[]
 }
 
 function isNonZero(balanceHex: string) {
@@ -80,8 +109,8 @@ export async function getTokenMetadata(contractAddress: string, chainId: number)
     }),
   })
 
-  const data = await res.json() as any
-  return data.result
+  const data = await parseJsonResponse(res)
+  return ensureRpcResult(data, `alchemy_getTokenMetadata(${chainId})`)
 }
 
 // ── Get native ETH balance ─────────────────────────────────────────
@@ -99,9 +128,10 @@ export async function getNativeBalance(address: string, chainId: number): Promis
     }),
   })
 
-  const data = await res.json() as any
+  const data = await parseJsonResponse(res)
+  const result = ensureRpcResult(data, `eth_getBalance(${chainId})`)
   // Convert hex wei to ETH string
-  const wei    = BigInt(data.result ?? '0x0')
+  const wei    = BigInt(result ?? '0x0')
   const ethVal = Number(wei) / 1e18
   return ethVal.toFixed(6)
 }
@@ -135,7 +165,11 @@ export async function getNFTs(address: string, chainId: number) {
     : `https://eth-mainnet.g.alchemy.com/nft/v3/${process.env.ALCHEMY_API_KEY}`
 
   const res  = await fetch(`${url}/getNFTsForOwner?owner=${address}&withMetadata=true&pageSize=20`)
-  const data = await res.json() as any
+  const data = await parseJsonResponse(res)
+  if (data?.error) {
+    const message = typeof data.error?.message === 'string' ? data.error.message : 'Unknown NFT API error'
+    throw new Error(`getNFTsForOwner(${chainId}): ${message}`)
+  }
   return data.ownedNfts ?? []
 }
 
@@ -150,6 +184,36 @@ export async function buildPortfolio(address: string) {
     getNFTs(address, 8453),
     getNFTs(address, 1),
   ])
+
+  const balanceReadsFailed =
+    baseTokens.status === 'rejected' &&
+    ethTokens.status === 'rejected' &&
+    nativeBase.status === 'rejected' &&
+    nativeEth.status === 'rejected'
+  const warnings: string[] = []
+
+  if (!hasUsableAlchemyKey()) {
+    warnings.push('ALCHEMY_API_KEY is missing or still set to a placeholder value.')
+  }
+
+  if (balanceReadsFailed) {
+    warnings.push('Wallet balance providers are unavailable right now.')
+  }
+
+  const providerFailures = [
+    { label: 'base token balances', result: baseTokens },
+    { label: 'ethereum token balances', result: ethTokens },
+    { label: 'base native balance', result: nativeBase },
+    { label: 'ethereum native balance', result: nativeEth },
+    { label: 'base NFTs', result: nftsBase },
+    { label: 'ethereum NFTs', result: nftsEth },
+  ].flatMap(({ label, result }) =>
+    result.status === 'rejected'
+      ? [`${label}: ${formatProviderError(result.reason)}`]
+      : []
+  )
+
+  warnings.push(...providerFailures)
 
   const baseTokenList = (baseTokens.status === 'fulfilled' ? baseTokens.value : [])
     .filter(t => isNonZero(t.tokenBalance))
@@ -176,7 +240,7 @@ export async function buildPortfolio(address: string) {
   )
 
   const symbols = Array.from(new Set(metadataList.map(t => t.meta?.symbol).filter(Boolean))) as string[]
-  const priceMap = await getTokenPrices(['ETH', ...symbols])
+  const priceMap: Record<string, number> = await getTokenPrices(['ETH', ...symbols]).catch(() => ({}))
 
   let totalUsdValue = 0
   const chainTotals: Record<number, number> = { 8453: 0, 1: 0 }
@@ -267,6 +331,7 @@ export async function buildPortfolio(address: string) {
     totalUsd:   `$${totalUsdValue.toFixed(2)}`,
     change24h,
     lastUpdated: Date.now(),
+    warnings,
   }
 }
 

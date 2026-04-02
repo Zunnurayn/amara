@@ -29,6 +29,9 @@ type AgentSettingsRow = {
   brickt_enabled: boolean
   auto_execute: boolean
   require_approval_above: number
+  allow_swaps: boolean
+  allow_bridges: boolean
+  allow_sends: boolean
   updated_at: string
 }
 
@@ -66,7 +69,12 @@ type TransactionRow = {
 }
 
 const connectionString = process.env.DATABASE_URL ?? process.env.SUPABASE_DB_URL
-const pool = connectionString ? new Pool({ connectionString }) : null
+const hasUsableConnectionString =
+  Boolean(connectionString) &&
+  !String(connectionString).includes('db.xxx.supabase.co') &&
+  !String(connectionString).includes('password@')
+const pool = hasUsableConnectionString && connectionString ? new Pool({ connectionString }) : null
+let hasLoggedDbFallback = false
 
 const memory = {
   users: new Map<string, DbUser>(),
@@ -74,6 +82,15 @@ const memory = {
   strategySettings: new Map<string, AgentSettingsRow>(),
   transactions: new Map<string, TransactionInsert[]>(),
   snapshots: new Map<string, { totalUsd: number; breakdown: object; snapshotDate: string }[]>(),
+}
+
+export function resetInMemoryDb() {
+  memory.users.clear()
+  memory.executions.clear()
+  memory.strategySettings.clear()
+  memory.transactions.clear()
+  memory.snapshots.clear()
+  hasLoggedDbFallback = false
 }
 
 function randomId(prefix: string) {
@@ -86,7 +103,15 @@ function normalizeAddress(walletAddress?: string | null) {
 
 async function query<T extends QueryResultRow>(sql: string, values: unknown[]) {
   if (!pool) return null
-  return pool.query<T>(sql, values)
+  try {
+    return await pool.query<T>(sql, values)
+  } catch (error) {
+    if (!hasLoggedDbFallback) {
+      hasLoggedDbFallback = true
+      console.warn('[db] database unavailable, falling back to in-memory mode', error)
+    }
+    return null
+  }
 }
 
 function defaultSettings(userId: string): AgentSettingsRow {
@@ -98,6 +123,9 @@ function defaultSettings(userId: string): AgentSettingsRow {
     brickt_enabled: true,
     auto_execute: true,
     require_approval_above: 500,
+    allow_swaps: true,
+    allow_bridges: true,
+    allow_sends: true,
     updated_at: new Date().toISOString(),
   }
 }
@@ -116,7 +144,9 @@ export async function upsertUser(privyUserId: string, walletAddress?: string) {
       `,
       [privyUserId, normalizedAddress]
     )
-    return result?.rows[0] ?? null
+    if (result?.rows[0]) {
+      return result.rows[0]
+    }
   }
 
   const existing = Array.from(memory.users.values()).find((user) => user.privy_user_id === privyUserId)
@@ -133,7 +163,9 @@ export async function upsertUser(privyUserId: string, walletAddress?: string) {
 export async function getUserByPrivyId(privyUserId: string) {
   if (pool) {
     const result = await query<DbUser>('select * from users where privy_user_id = $1 limit 1', [privyUserId])
-    return result?.rows[0] ?? null
+    if (result?.rows[0]) {
+      return result.rows[0]
+    }
   }
 
   return Array.from(memory.users.values()).find((user) => user.privy_user_id === privyUserId) ?? null
@@ -145,7 +177,9 @@ export async function getUserByWalletAddress(walletAddress: string) {
 
   if (pool) {
     const result = await query<DbUser>('select * from users where wallet_address = $1 limit 1', [normalizedAddress])
-    return result?.rows[0] ?? null
+    if (result?.rows[0]) {
+      return result.rows[0]
+    }
   }
 
   return Array.from(memory.users.values()).find((user) => user.wallet_address === normalizedAddress) ?? null
@@ -160,10 +194,18 @@ export async function getAgentSettings(userId: string) {
     if (existing?.rows[0]) return existing.rows[0]
 
     const created = await query<AgentSettingsRow>(
-      'insert into agent_settings (user_id) values ($1) returning *',
+      `
+        insert into agent_settings (user_id)
+        values ($1)
+        on conflict (user_id)
+        do update set updated_at = agent_settings.updated_at
+        returning *
+      `,
       [userId]
     )
-    return created?.rows[0] ?? defaultSettings(userId)
+    if (created?.rows[0]) {
+      return created.rows[0]
+    }
   }
 
   const current = memory.strategySettings.get(userId) ?? defaultSettings(userId)
@@ -181,7 +223,9 @@ export async function setStrategyEnabled(userId: string, strategyId: string, ena
       `update agent_settings set ${column} = $2, updated_at = now() where user_id = $1 returning *`,
       [userId, enabled]
     )
-    return result?.rows[0] ?? null
+    if (result?.rows[0]) {
+      return result.rows[0]
+    }
   }
 
   const settings = await getAgentSettings(userId)
@@ -190,6 +234,60 @@ export async function setStrategyEnabled(userId: string, strategyId: string, ena
     [column]: enabled,
     updated_at: new Date().toISOString(),
   } as AgentSettingsRow
+  memory.strategySettings.set(userId, nextSettings)
+  return nextSettings
+}
+
+export async function updateAgentSettings(
+  userId: string,
+  updates: Partial<Pick<
+    AgentSettingsRow,
+    'auto_execute' | 'require_approval_above' | 'allow_swaps' | 'allow_bridges' | 'allow_sends'
+  >>
+) {
+  const nextUpdates: Record<string, unknown> = {}
+  if (typeof updates.auto_execute === 'boolean') {
+    nextUpdates.auto_execute = updates.auto_execute
+  }
+  if (typeof updates.require_approval_above === 'number' && Number.isFinite(updates.require_approval_above)) {
+    nextUpdates.require_approval_above = updates.require_approval_above
+  }
+  if (typeof updates.allow_swaps === 'boolean') {
+    nextUpdates.allow_swaps = updates.allow_swaps
+  }
+  if (typeof updates.allow_bridges === 'boolean') {
+    nextUpdates.allow_bridges = updates.allow_bridges
+  }
+  if (typeof updates.allow_sends === 'boolean') {
+    nextUpdates.allow_sends = updates.allow_sends
+  }
+
+  if (!Object.keys(nextUpdates).length) {
+    return getAgentSettings(userId)
+  }
+
+  if (pool) {
+    await getAgentSettings(userId)
+    const fields = Object.keys(nextUpdates)
+    const assignments = fields
+      .map((field, index) => `${field} = $${index + 2}`)
+      .join(', ')
+    const values = [userId, ...fields.map((field) => nextUpdates[field])]
+    const result = await query<AgentSettingsRow>(
+      `update agent_settings set ${assignments}, updated_at = now() where user_id = $1 returning *`,
+      values
+    )
+    if (result?.rows[0]) {
+      return result.rows[0]
+    }
+  }
+
+  const settings = await getAgentSettings(userId)
+  const nextSettings: AgentSettingsRow = {
+    ...settings,
+    ...nextUpdates,
+    updated_at: new Date().toISOString(),
+  }
   memory.strategySettings.set(userId, nextSettings)
   return nextSettings
 }
@@ -395,9 +493,9 @@ export async function updateTransactionStatus(
   }
 
   for (const [userId, entries] of memory.executions.entries()) {
-    const next = entries.map((entry) =>
+    const next: AgentExecutionRow[] = entries.map((entry) =>
       entry.tx_hash === txHash && entry.chain_id === chainId
-        ? { ...entry, status: status === 'confirmed' ? 'success' : status }
+        ? { ...entry, status: status === 'confirmed' ? 'success' : status === 'failed' ? 'failed' : 'pending' }
         : entry
     )
     memory.executions.set(userId, next)

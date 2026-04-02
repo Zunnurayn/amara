@@ -6,10 +6,10 @@ import {
   useEffect,
   useMemo,
   useRef,
+  useState,
 } from 'react'
 import {
   PrivyProvider,
-  useIdentityToken,
   useLogout,
   usePrivy,
   type User,
@@ -67,10 +67,40 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 }
 
 function AuthSessionProvider({ children }: { children: React.ReactNode }) {
-  const { ready, authenticated, user, login: openLogin } = usePrivy()
-  const { identityToken } = useIdentityToken()
+  const { ready, authenticated, user, login: openLogin, getAccessToken } = usePrivy()
   const { logout } = useLogout()
   const lastSyncedRef = useRef<string | null>(null)
+  const [identityToken, setIdentityToken] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!ready) return
+    if (!authenticated) {
+      setIdentityToken(null)
+      return
+    }
+
+    let cancelled = false
+
+    async function loadAccessToken() {
+      try {
+        const token = await getAccessToken()
+        if (!cancelled) {
+          setIdentityToken(token)
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setIdentityToken(null)
+          console.error('[auth token]', error)
+        }
+      }
+    }
+
+    void loadAccessToken()
+
+    return () => {
+      cancelled = true
+    }
+  }, [authenticated, getAccessToken, ready])
 
   useEffect(() => {
     if (!ready || !authenticated || !identityToken || !user?.id) return

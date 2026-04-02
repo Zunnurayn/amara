@@ -21,7 +21,7 @@ export interface AgentActionCard {
   type: AgentIntentType
   title: string
   rows: { label: string; value: string; highlight?: boolean }[]
-  status: 'pending' | 'executing' | 'confirmed' | 'failed' | 'cancelled'
+  status: 'pending' | 'executing' | 'submitted' | 'confirmed' | 'failed' | 'cancelled'
   txHash?: `0x${string}`
   metadata?: AgentActionMetadata
 }

@@ -4,7 +4,15 @@ import { useCallback } from 'react'
 import { useActiveWallet, usePrivy, useWallets, type ConnectedWallet } from '@privy-io/react-auth'
 import { executeSwap, getSwapQuote } from '@anara/chain'
 import { useAgentStore, useWalletStore } from '../store'
-import type { AgentActionCard, AgentActionMetadata, AgentMessage, TokenBalance, Transaction } from '@anara/types'
+import type {
+  AgentActionCard,
+  AgentActionMetadata,
+  AgentMessage,
+  TokenBalance,
+  Transaction,
+  WalletChainSummary,
+  WalletNftSummary,
+} from '@anara/types'
 import { useAuth } from '../lib/auth'
 import { base, mainnet } from 'viem/chains'
 import {
@@ -27,6 +35,10 @@ type ExecutionWallet = {
   address: string
   switchChain: (targetChainId: `0x${string}` | number) => Promise<void>
   getEthereumProvider: () => Promise<Eip1193Provider>
+}
+
+type ActiveWalletConnectResult = {
+  wallet?: unknown
 }
 
 function generateId() {
@@ -130,28 +142,44 @@ export function useAgent() {
       const [portfolioRes, txRes] = await Promise.all([
         fetch(`${API_URL}/api/wallet/${address}/portfolio`, {
           headers: buildHeaders(identityToken, false),
+          cache: 'no-store',
         }),
-        fetch(`${API_URL}/api/wallet/${address}/transactions?chainId=${chainId ?? 8453}`, {
+        fetch(`${API_URL}/api/wallet/${address}/transactions`, {
           headers: buildHeaders(identityToken, false),
+          cache: 'no-store',
         }),
       ])
+
+      const nextErrors: string[] = []
 
       if (portfolioRes.ok) {
         const portfolio = await portfolioRes.json()
         setPortfolio({
           totalUsd: portfolio.totalUsd ?? '$0.00',
           tokens: normalizeTokens(portfolio.tokens ?? []),
+          nfts: normalizeNfts(portfolio.nfts ?? []),
+          chains: normalizeChains(portfolio.chains ?? []),
           lastUpdated: typeof portfolio.lastUpdated === 'number' ? portfolio.lastUpdated : Date.now(),
         })
+        if (Array.isArray(portfolio.warnings) && portfolio.warnings.length) {
+          nextErrors.push(String(portfolio.warnings[0]))
+        }
       } else {
-        setError('Failed to load portfolio')
+        nextErrors.push('Failed to load portfolio')
       }
 
       if (txRes.ok) {
         const txData = await txRes.json()
         setTransactions((txData.transactions ?? []) as Transaction[])
-      } else if (!portfolioRes.ok) {
-        setError('Failed to load wallet activity')
+        if (Array.isArray(txData.warnings) && txData.warnings.length) {
+          nextErrors.push(String(txData.warnings[0]))
+        }
+      } else {
+        nextErrors.push('Failed to load wallet activity')
+      }
+
+      if (nextErrors.length) {
+        setError(nextErrors.join('. '))
       }
     } finally {
       setLoading(false)
@@ -196,13 +224,17 @@ export function useAgent() {
 
       if (!simulationRes.ok) throw new Error(`Simulation failed: ${simulationRes.status}`)
       const simulation = await simulationRes.json()
+      if (!simulation?.willSucceed) {
+        const reason = simulation?.warnings?.[0] || 'This action is not executable right now.'
+        throw new Error(reason)
+      }
 
       const submitted = await submitAction(
         card,
         address,
         chainId ?? 8453,
         wallets,
-        activeWallet,
+        isExecutionWallet(activeWallet) ? activeWallet : undefined,
         connectActiveWallet,
         getEthereumProvider
       )
@@ -225,7 +257,7 @@ export function useAgent() {
 
       updateMessage(messageId, (msg) => ({
         ...msg,
-        actionCard: data.actionCard ?? { ...card, status: 'confirmed' },
+        actionCard: data.actionCard ?? { ...card, status: 'submitted', txHash: submitted.txHash },
       }))
       addMessage({
         id: generateId(),
@@ -238,6 +270,7 @@ export function useAgent() {
         ),
         timestamp: Date.now(),
       })
+      void monitorTransaction(messageId, submitted.txHash, submitted.chainId, refreshWallet)
       await refreshWallet()
       return data
     } catch (err) {
@@ -245,12 +278,11 @@ export function useAgent() {
         ...msg,
         actionCard: msg.actionCard ? { ...msg.actionCard, status: 'failed' } : msg.actionCard,
       }))
+      const errorMessage = getUserFacingExecutionError(err)
       addMessage({
         id: generateId(),
         role: 'assistant',
-        content: err instanceof Error
-          ? `Execution failed: ${err.message}. Review the action card details and try again.`
-          : 'Execution failed. Review the action card details and try again.',
+        content: errorMessage,
         timestamp: Date.now(),
       })
       throw err
@@ -284,12 +316,114 @@ function buildHeaders(identityToken: string | null, includeJson = true) {
 }
 
 function buildExecutionSuccessMessage(txHash?: string, route?: string, gasEstimateUsd?: string, explorerUrl?: string) {
-  const parts = ['Execution submitted successfully.']
-  if (route) parts.push(`Route: ${route}.`)
-  if (gasEstimateUsd) parts.push(`Estimated gas: ${gasEstimateUsd}.`)
-  if (txHash) parts.push(`Tx: ${txHash.slice(0, 10)}…${txHash.slice(-4)}.`)
-  if (explorerUrl) parts.push(`Explorer: ${explorerUrl}.`)
-  return parts.join(' ')
+  const parts = ['Execution submitted and awaiting confirmation.']
+  if (route) parts.push(`Route: ${route}`)
+  if (gasEstimateUsd) parts.push(`Estimated gas: ${gasEstimateUsd}`)
+  if (txHash) parts.push(`Tx: ${txHash.slice(0, 10)}…${txHash.slice(-4)}`)
+  if (explorerUrl) parts.push(`Explorer: ${explorerUrl}`)
+  return parts.join('\n')
+}
+
+async function monitorTransaction(
+  messageId: string,
+  txHash: `0x${string}`,
+  chainId: number,
+  onConfirmed?: () => Promise<unknown>,
+) {
+  let announcedPending = false
+  for (let attempt = 0; attempt < 24; attempt += 1) {
+    await delay(attempt === 0 ? 1000 : 2000)
+
+    try {
+      const res = await fetch(`${API_URL}/api/tx/status/${chainId}/${txHash}`)
+      if (!res.ok) continue
+      const data = await res.json()
+
+      if (data.status === 'confirmed' || data.status === 'failed') {
+        useAgentStore.getState().updateMessage(messageId, (msg) => ({
+          ...msg,
+          actionCard: msg.actionCard
+            ? {
+                ...msg.actionCard,
+                status: data.status === 'confirmed' ? 'confirmed' : 'failed',
+                txHash,
+              }
+            : msg.actionCard,
+        }))
+        if (data.status === 'confirmed') {
+          await onConfirmed?.()
+          useAgentStore.getState().addMessage({
+            id: `msg_confirmed_${txHash}_${Date.now()}`,
+            role: 'assistant',
+            content: `Transaction confirmed onchain.\nTx: ${txHash.slice(0, 10)}…${txHash.slice(-4)}\nExplorer: ${data.explorerUrl}`,
+            timestamp: Date.now(),
+          })
+        } else {
+          useAgentStore.getState().addMessage({
+            id: `msg_failed_${txHash}_${Date.now()}`,
+            role: 'assistant',
+            content: `Transaction failed onchain.\nTx: ${txHash.slice(0, 10)}…${txHash.slice(-4)}\nExplorer: ${data.explorerUrl}`,
+            timestamp: Date.now(),
+          })
+        }
+        return
+      }
+
+      useAgentStore.getState().updateMessage(messageId, (msg) => ({
+        ...msg,
+        actionCard: msg.actionCard
+          ? {
+              ...msg.actionCard,
+              status: 'submitted',
+              txHash,
+            }
+          : msg.actionCard,
+      }))
+      if (!announcedPending) {
+        announcedPending = true
+      }
+    } catch {
+      // Keep polling quietly while the tx is propagating.
+    }
+  }
+}
+
+function getUserFacingExecutionError(error: unknown) {
+  const rawMessage = error instanceof Error ? error.message : 'Execution failed.'
+  const message = rawMessage.toLowerCase()
+
+  if (message.includes('balanceerror') || message.includes('balance is too low') || message.includes('insufficient balance')) {
+    return 'Insufficient balance for this action. Reduce the amount or fund the wallet, then try again.'
+  }
+  if (message.includes('insufficient') && message.includes('balance')) {
+    return 'Insufficient balance for this action. Reduce the amount or fund the wallet, then try again.'
+  }
+
+  if (message.includes('user rejected') || message.includes('rejected the request') || message.includes('denied')) {
+    return 'Transaction was cancelled in the wallet before submission.'
+  }
+
+  if (message.includes('wallet connectivity is still initializing')) {
+    return 'Wallet connectivity is still initializing. Try again in a moment.'
+  }
+
+  if (message.includes('destination address is invalid')) {
+    return 'The destination address is invalid. Check the address and try again.'
+  }
+
+  if (message.includes('client is not provided')) {
+    return 'The wallet session could not be attached to the route executor. Refresh the page and try again.'
+  }
+
+  if (message.includes('route execution')) {
+    return 'Transaction could not be completed. Review the route or try again.'
+  }
+
+  if (error instanceof Error) {
+    return `Execution failed: ${error.message}. Review the action card details and try again.`
+  }
+
+  return 'Execution failed. Review the action card details and try again.'
 }
 
 async function submitAction(
@@ -298,7 +432,7 @@ async function submitAction(
   activeChainId: number,
   wallets: ConnectedWallet[],
   activeWallet: ConnectedWallet | undefined,
-  connectActiveWallet: (opts?: { reset?: boolean }) => Promise<{ wallet?: ConnectedWallet }>,
+  connectActiveWallet: (opts?: { reset?: boolean }) => Promise<ActiveWalletConnectResult>,
   getEthereumProvider: () => unknown
 ) {
   const metadata = card.metadata
@@ -378,18 +512,24 @@ async function submitQuotedRoute(
     throw new Error('This route is missing quote parameters.')
   }
 
+  const fromChainId = metadata.fromChainId
+  const toChainId = metadata.toChainId
+  const fromTokenAddress = metadata.fromTokenAddress
+  const toTokenAddress = metadata.toTokenAddress
+  const fromAmount = metadata.fromAmount
+
   const quote = await withStepError('quote refresh', async () => await getSwapQuote({
-    fromChainId: metadata.fromChainId,
-    toChainId: metadata.toChainId,
-    fromTokenAddress: metadata.fromTokenAddress,
-    toTokenAddress: metadata.toTokenAddress,
-    fromAmount: metadata.fromAmount,
+    fromChainId,
+    toChainId,
+    fromTokenAddress,
+    toTokenAddress,
+    fromAmount,
     fromAddress: address,
     slippage: 0.005,
   })) as unknown as Parameters<typeof executeSwap>[0]
 
   let latestRouteHash: `0x${string}` | null = null
-  let latestRouteChainId = metadata.fromChainId
+  let latestRouteChainId = fromChainId
 
   const executedRoute = await withStepError('route execution engine', async () => await executeSwap(
     quote,
@@ -425,7 +565,7 @@ async function getExecutionWallet(
   wallets: ConnectedWallet[],
   address: string,
   activeWallet: ConnectedWallet | undefined,
-  connectActiveWallet: (opts?: { reset?: boolean }) => Promise<{ wallet?: ConnectedWallet }>,
+  connectActiveWallet: (opts?: { reset?: boolean }) => Promise<ActiveWalletConnectResult>,
   getEthereumProvider: () => unknown
 ): Promise<ExecutionWallet | null> {
   if (activeWallet?.address) {
@@ -439,7 +579,7 @@ async function getExecutionWallet(
 
   try {
     const connected = await connectActiveWallet()
-    if (connected.wallet?.address) {
+    if (isExecutionWallet(connected.wallet)) {
       return connected.wallet
     }
   } catch (error) {
@@ -477,7 +617,11 @@ async function withStepError<T>(label: string, work: () => Promise<T>) {
   }
 }
 
-async function getWalletClientForChain(wallet: ConnectedWallet, chainId: number) {
+function delay(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+async function getWalletClientForChain(wallet: ExecutionWallet, chainId: number) {
   await wallet.switchChain(chainId)
   const provider = await wallet.getEthereumProvider()
   return createWalletClient({
@@ -530,6 +674,16 @@ function buildExplorerUrl(chainId: number, txHash: string) {
   return `${host}/tx/${txHash}`
 }
 
+function isExecutionWallet(wallet: unknown): wallet is ExecutionWallet {
+  return Boolean(
+    wallet &&
+    typeof wallet === 'object' &&
+    'address' in wallet &&
+    'switchChain' in wallet &&
+    'getEthereumProvider' in wallet
+  )
+}
+
 function extractLatestProcess(route: {
   steps?: Array<{
     execution?: {
@@ -563,4 +717,24 @@ function normalizeTokens(tokens: Array<Record<string, unknown>>): TokenBalance[]
     logoUrl: typeof token.logo === 'string' ? token.logo : undefined,
     chainId: Number(token.chainId ?? 8453),
   }))
+}
+
+function normalizeNfts(nfts: Array<Record<string, unknown>>): WalletNftSummary[] {
+  return nfts.map((nft, index) => ({
+    tokenId: String(nft.tokenId ?? index),
+    collection: String(nft.collection ?? 'Unknown Collection'),
+    name: typeof nft.name === 'string' ? nft.name : undefined,
+    chain: String(nft.chain ?? 'base'),
+    imageUrl: typeof nft.imageUrl === 'string' ? nft.imageUrl : undefined,
+  }))
+}
+
+function normalizeChains(chains: Array<Record<string, unknown>>): WalletChainSummary[] {
+  return chains
+    .map((chain) => ({
+      chainId: Number(chain.chainId ?? 0),
+      nativeBalance: String(chain.nativeBalance ?? '0'),
+      totalUsd: String(chain.totalUsd ?? '$0.00'),
+    }))
+    .filter((chain) => Number.isFinite(chain.chainId) && chain.chainId > 0)
 }

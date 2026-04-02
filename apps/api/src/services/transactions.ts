@@ -5,6 +5,7 @@
 
 const ALCHEMY_BASE_URL = `https://base-mainnet.g.alchemy.com/v2/${process.env.ALCHEMY_API_KEY}`
 const ALCHEMY_ETH_URL  = `https://eth-mainnet.g.alchemy.com/v2/${process.env.ALCHEMY_API_KEY}`
+const ETHERSCAN_V2_API_URL = 'https://api.etherscan.io/v2/api'
 
 type TransferDirection = 'from' | 'to'
 
@@ -19,13 +20,15 @@ export interface TransferRecord {
   rawContract?: { value?: string; address?: string; decimal?: string }
   metadata?: { blockTimestamp?: string }
   blockNum?: string
+  erc721TokenId?: string
+  tokenId?: string
 }
 
 export interface TransactionSummary {
   hash: `0x${string}`
   chainId: number
-  type: 'send' | 'receive'
-  status: 'confirmed'
+  type: 'send' | 'receive' | 'contract'
+  status: 'confirmed' | 'failed'
   from: `0x${string}`
   to?: `0x${string}`
   value: string
@@ -41,6 +44,43 @@ export interface TransactionSummary {
   bridgeProtocol?: string
 }
 
+export interface TransactionDebugSummary {
+  chainId: number
+  alchemyOutgoing: number | string
+  alchemyIncoming: number | string
+  alchemyMerged: number
+  explorerNormal: number | string
+  explorerToken: number | string
+  finalCount: number
+}
+
+interface ExplorerTxRecord {
+  hash: string
+  from: string
+  to: string
+  value: string
+  timeStamp: string
+  blockNumber: string
+  nonce: string
+  txreceipt_status?: string
+  isError?: string
+  functionName?: string
+  input?: string
+}
+
+interface ExplorerTokenTxRecord {
+  hash: string
+  from: string
+  to: string
+  value: string
+  tokenSymbol?: string
+  tokenName?: string
+  tokenDecimal?: string
+  timeStamp: string
+  blockNumber: string
+  nonce?: string
+}
+
 function getAlchemyUrl(chainId: number) {
   return chainId === 8453 ? ALCHEMY_BASE_URL : ALCHEMY_ETH_URL
 }
@@ -54,6 +94,18 @@ function normalizeAddress(addr?: string) {
   return addr ? addr.toLowerCase() : addr
 }
 
+async function parseJsonResponse(response: Response) {
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`)
+  }
+  return await response.json() as any
+}
+
+function hasUsableApiKey(value?: string) {
+  const key = value?.trim()
+  return Boolean(key && key !== 'xxxxxx')
+}
+
 async function fetchTransfers(address: string, chainId: number, direction: TransferDirection, limit: number) {
   const url = getAlchemyUrl(chainId)
   const addr = normalizeAddress(address)
@@ -61,9 +113,11 @@ async function fetchTransfers(address: string, chainId: number, direction: Trans
   const params: Record<string, unknown> = {
     fromBlock: '0x0',
     toBlock: 'latest',
-    category: ['external', 'internal', 'erc20'],
+    category: chainId === 1
+      ? ['external', 'internal', 'erc20', 'erc721', 'erc1155']
+      : ['external', 'erc20', 'erc721', 'erc1155'],
     withMetadata: true,
-    excludeZeroValue: true,
+    excludeZeroValue: false,
     maxCount: toHexCount(limit),
     order: 'desc',
   }
@@ -82,20 +136,57 @@ async function fetchTransfers(address: string, chainId: number, direction: Trans
     }),
   })
 
-  const data = await res.json() as any
+  const data = await parseJsonResponse(res)
+  if (data?.error) {
+    const message = typeof data.error?.message === 'string' ? data.error.message : 'Unknown transfer API error'
+    throw new Error(`alchemy_getAssetTransfers(${chainId}/${direction}): ${message}`)
+  }
   return (data.result?.transfers ?? []) as TransferRecord[]
 }
 
 export async function getRecentTransactions(address: string, chainId: number, limit = 20): Promise<TransactionSummary[]> {
+  const { transactions } = await getRecentTransactionsWithDebug(address, chainId, limit)
+  return transactions
+}
+
+export async function getRecentTransactionsWithDebug(address: string, chainId: number, limit = 20): Promise<{
+  transactions: TransactionSummary[]
+  debug: TransactionDebugSummary
+}> {
   const [outgoing, incoming] = await Promise.allSettled([
     fetchTransfers(address, chainId, 'from', limit),
     fetchTransfers(address, chainId, 'to', limit),
   ])
 
+  if (outgoing.status === 'rejected' && incoming.status === 'rejected') {
+    throw new Error(
+      [
+        `outgoing: ${outgoing.reason instanceof Error ? outgoing.reason.message : String(outgoing.reason)}`,
+        `incoming: ${incoming.reason instanceof Error ? incoming.reason.message : String(incoming.reason)}`,
+      ].join(' | ')
+    )
+  }
+
   const merged = [
     ...(outgoing.status === 'fulfilled' ? outgoing.value : []),
     ...(incoming.status === 'fulfilled' ? incoming.value : []),
   ]
+
+  if (!merged.length) {
+    const { transactions, normalCount, tokenCount } = await fetchExplorerTransactions(address, chainId, limit)
+    return {
+      transactions,
+      debug: {
+        chainId,
+        alchemyOutgoing: outgoing.status === 'fulfilled' ? outgoing.value.length : formatReason(outgoing.reason),
+        alchemyIncoming: incoming.status === 'fulfilled' ? incoming.value.length : formatReason(incoming.reason),
+        alchemyMerged: 0,
+        explorerNormal: normalCount,
+        explorerToken: tokenCount,
+        finalCount: transactions.length,
+      },
+    }
+  }
 
   const seen = new Set<string>()
   const records = merged.filter((t) => {
@@ -113,9 +204,9 @@ export async function getRecentTransactions(address: string, chainId: number, li
       ? new Date(t.metadata.blockTimestamp).getTime()
       : 0
     const blockNumber = t.blockNum ? Number.parseInt(t.blockNum, 16) : undefined
-    const value = t.value ?? '0'
-    const asset = t.asset ?? ''
-    const valueFormatted = asset ? `${value} ${asset}` : value
+    const value = t.value ?? t.rawContract?.value ?? '0'
+    const asset = t.asset ?? inferAssetLabel(t)
+    const valueFormatted = formatTransferValue(value, asset, t)
     const valueUsd = asset === 'USDC' || asset === 'USDT'
       ? `$${Number.parseFloat(value).toFixed(2)}`
       : undefined
@@ -138,7 +229,235 @@ export async function getRecentTransactions(address: string, chainId: number, li
     }
   })
 
-  return txs
+  const transactions = txs
     .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
     .slice(0, limit)
+
+  return {
+    transactions,
+    debug: {
+      chainId,
+      alchemyOutgoing: outgoing.status === 'fulfilled' ? outgoing.value.length : formatReason(outgoing.reason),
+      alchemyIncoming: incoming.status === 'fulfilled' ? incoming.value.length : formatReason(incoming.reason),
+      alchemyMerged: merged.length,
+      explorerNormal: 0,
+      explorerToken: 0,
+      finalCount: transactions.length,
+    },
+  }
+}
+
+async function fetchExplorerTransactions(address: string, chainId: number, limit: number): Promise<{
+  transactions: TransactionSummary[]
+  normalCount: number | string
+  tokenCount: number | string
+}> {
+  const [normalTxs, tokenTxs] = await Promise.allSettled([
+    fetchExplorerNormalTransactions(address, chainId, limit),
+    fetchExplorerTokenTransactions(address, chainId, limit),
+  ])
+
+  const merged = mergeExplorerTransactions(
+    normalTxs.status === 'fulfilled' ? normalTxs.value : [],
+    tokenTxs.status === 'fulfilled' ? tokenTxs.value : [],
+    limit
+  )
+
+  if (merged.length) {
+    return {
+      transactions: merged,
+      normalCount: normalTxs.status === 'fulfilled' ? normalTxs.value.length : formatReason(normalTxs.reason),
+      tokenCount: tokenTxs.status === 'fulfilled' ? tokenTxs.value.length : formatReason(tokenTxs.reason),
+    }
+  }
+
+  if (normalTxs.status === 'rejected' && tokenTxs.status === 'rejected') {
+    throw new Error(
+      [
+        `explorer txlist: ${normalTxs.reason instanceof Error ? normalTxs.reason.message : String(normalTxs.reason)}`,
+        `explorer tokentx: ${tokenTxs.reason instanceof Error ? tokenTxs.reason.message : String(tokenTxs.reason)}`,
+      ].join(' | ')
+    )
+  }
+
+  return {
+    transactions: [],
+    normalCount: normalTxs.status === 'fulfilled' ? normalTxs.value.length : formatReason(normalTxs.reason),
+    tokenCount: tokenTxs.status === 'fulfilled' ? tokenTxs.value.length : formatReason(tokenTxs.reason),
+  }
+}
+
+async function fetchExplorerNormalTransactions(address: string, chainId: number, limit: number): Promise<TransactionSummary[]> {
+  const apiUrl = ETHERSCAN_V2_API_URL
+  const apiKey = chainId === 8453 ? process.env.BASESCAN_API_KEY : process.env.ETHERSCAN_API_KEY
+  const params = new URLSearchParams({
+    chainid: String(chainId),
+    module: 'account',
+    action: 'txlist',
+    address,
+    page: '1',
+    offset: String(limit),
+    sort: 'desc',
+  })
+
+  if (hasUsableApiKey(apiKey)) {
+    params.set('apikey', apiKey!)
+  }
+
+  const response = await fetch(`${apiUrl}?${params.toString()}`)
+  const data = await parseJsonResponse(response) as {
+    status?: string
+    message?: string
+    result?: ExplorerTxRecord[] | string
+  }
+
+  if (data.status === '0' && typeof data.result === 'string' && data.result !== 'No transactions found') {
+    throw new Error(`explorer txlist(${chainId}): ${data.result}`)
+  }
+
+  const records = Array.isArray(data.result) ? data.result : []
+  const normalizedAddress = normalizeAddress(address)
+
+  return records.map((record): TransactionSummary => {
+    const isOutgoing = normalizeAddress(record.from) === normalizedAddress
+    const isContract = Boolean(record.input && record.input !== '0x')
+    const valueEth = Number(record.value || '0') / 1e18
+    const status = record.txreceipt_status === '0' || record.isError === '1' ? 'failed' : 'confirmed'
+    return {
+      hash: record.hash as `0x${string}`,
+      chainId,
+      type: isContract ? 'contract' : isOutgoing ? 'send' : 'receive',
+      status,
+      from: record.from as `0x${string}`,
+      to: record.to as `0x${string}` | undefined,
+      value: String(valueEth),
+      valueFormatted: formatExplorerValue(record, valueEth, isContract),
+      timestamp: Number(record.timeStamp) * 1000,
+      blockNumber: Number(record.blockNumber),
+      nonce: Number(record.nonce),
+    }
+  }).slice(0, limit)
+}
+
+async function fetchExplorerTokenTransactions(address: string, chainId: number, limit: number): Promise<TransactionSummary[]> {
+  const apiUrl = ETHERSCAN_V2_API_URL
+  const apiKey = chainId === 8453 ? process.env.BASESCAN_API_KEY : process.env.ETHERSCAN_API_KEY
+  const params = new URLSearchParams({
+    chainid: String(chainId),
+    module: 'account',
+    action: 'tokentx',
+    address,
+    page: '1',
+    offset: String(limit),
+    sort: 'desc',
+  })
+
+  if (hasUsableApiKey(apiKey)) {
+    params.set('apikey', apiKey!)
+  }
+
+  const response = await fetch(`${apiUrl}?${params.toString()}`)
+  const data = await parseJsonResponse(response) as {
+    status?: string
+    message?: string
+    result?: ExplorerTokenTxRecord[] | string
+  }
+
+  if (data.status === '0' && typeof data.result === 'string' && data.result !== 'No transactions found') {
+    throw new Error(`explorer tokentx(${chainId}): ${data.result}`)
+  }
+
+  const records = Array.isArray(data.result) ? data.result : []
+  const normalizedAddress = normalizeAddress(address)
+
+  return records.map((record): TransactionSummary => {
+    const isOutgoing = normalizeAddress(record.from) === normalizedAddress
+    const decimals = Number(record.tokenDecimal || '18')
+    const amount = formatTokenUnits(record.value || '0', decimals)
+    const symbol = record.tokenSymbol || record.tokenName || 'TOKEN'
+    return {
+      hash: record.hash as `0x${string}`,
+      chainId,
+      type: isOutgoing ? 'send' : 'receive',
+      status: 'confirmed',
+      from: record.from as `0x${string}`,
+      to: record.to as `0x${string}` | undefined,
+      value: amount,
+      valueFormatted: `${amount} ${symbol}`,
+      valueUsd: symbol === 'USDC' || symbol === 'USDT'
+        ? `$${Number.parseFloat(amount || '0').toFixed(2)}`
+        : undefined,
+      timestamp: Number(record.timeStamp) * 1000,
+      blockNumber: Number(record.blockNumber),
+      nonce: Number(record.nonce || '0'),
+      tokenIn: !isOutgoing ? { symbol, amount } : undefined,
+      tokenOut: isOutgoing ? { symbol, amount } : undefined,
+    }
+  }).slice(0, limit)
+}
+
+function mergeExplorerTransactions(
+  normalTxs: TransactionSummary[],
+  tokenTxs: TransactionSummary[],
+  limit: number
+) {
+  const byHash = new Map<string, TransactionSummary>()
+
+  for (const tx of normalTxs) {
+    byHash.set(`${tx.chainId}:${tx.hash.toLowerCase()}`, tx)
+  }
+
+  for (const tx of tokenTxs) {
+    const key = `${tx.chainId}:${tx.hash.toLowerCase()}`
+    const existing = byHash.get(key)
+    if (!existing) {
+      byHash.set(key, tx)
+      continue
+    }
+    byHash.set(key, {
+      ...existing,
+      valueFormatted: existing.valueFormatted === 'Contract interaction' ? tx.valueFormatted : existing.valueFormatted,
+      valueUsd: existing.valueUsd ?? tx.valueUsd,
+      tokenIn: existing.tokenIn ?? tx.tokenIn,
+      tokenOut: existing.tokenOut ?? tx.tokenOut,
+    })
+  }
+
+  return Array.from(byHash.values())
+    .sort((left, right) => right.timestamp - left.timestamp)
+    .slice(0, limit)
+}
+
+function formatExplorerValue(record: ExplorerTxRecord, valueEth: number, isContract: boolean) {
+  if (isContract) {
+    return record.functionName?.trim() || 'Contract interaction'
+  }
+  return valueEth > 0 ? `${valueEth} ETH` : 'Wallet activity'
+}
+
+function formatTokenUnits(value: string, decimals: number, precision = 6) {
+  const raw = BigInt(value || '0')
+  if (decimals <= 0) return raw.toString()
+  const padded = raw.toString().padStart(decimals + 1, '0')
+  const whole = padded.slice(0, -decimals)
+  const fraction = padded.slice(-decimals).replace(/0+$/, '').slice(0, precision)
+  return fraction ? `${whole}.${fraction}` : whole
+}
+
+function formatReason(reason: unknown) {
+  return reason instanceof Error ? reason.message : String(reason)
+}
+
+function inferAssetLabel(transfer: TransferRecord) {
+  if (transfer.category === 'erc721' || transfer.category === 'erc1155') return 'NFT'
+  return ''
+}
+
+function formatTransferValue(value: string, asset: string, transfer: TransferRecord) {
+  if (transfer.category === 'erc721' || transfer.category === 'erc1155') {
+    const tokenId = transfer.erc721TokenId ?? transfer.tokenId
+    return tokenId ? `${asset} #${tokenId}` : asset
+  }
+  if (!asset) return value
+  return `${value} ${asset}`
 }

@@ -1,22 +1,20 @@
 # Anara Wallet
 
-> **The world's first autonomous multichain wallet.**
-> Your agent works while you sleep.
+> Assistive web-first wallet for Base and Ethereum.
+> The agent prepares actions, you confirm execution.
 
 ---
 
 ## What is Anara?
 
-Anara is an AI-powered crypto wallet where an autonomous agent manages your DeFi portfolio on your behalf. Unlike MetaMask, Rainbow, or Coinbase Wallet — which are purely passive — Anara's agent:
+Anara is an AI-assisted crypto wallet focused on Base and Ethereum. The agent helps the user:
 
-- Executes arbitrage trades 24/7
-- Auto-compounds yield positions
-- Rebalances your portfolio when it drifts
-- Bridges assets to the best chain for the action
-- Sends and receives on voice command
-- Briefs you on everything it did while you were away
+- view real balances, assets, NFTs, and wallet activity
+- ask for swap, send, and bridge previews in natural language
+- confirm and execute real wallet-backed transactions
+- review status updates and recent execution history
 
-The African-inspired identity — kente colours, Adinkra motifs, Yoruba proverbs — is distinctive without limiting global adoption.
+The current MVP is explicitly confirmation-based. It is not unattended autonomous execution.
 
 ---
 
@@ -88,15 +86,20 @@ pnpm install
 ### Environment
 
 ```bash
-cp .env.example apps/api/.env
-cp .env.example apps/web/.env.local
-cp .env.example apps/mobile/.env
+cp .env.example .env
 ```
 
 Fill in at minimum:
 - `ANTHROPIC_API_KEY` — from console.anthropic.com
 - `ALCHEMY_API_KEY` — from alchemy.com
 - `NEXT_PUBLIC_PRIVY_APP_ID` — from privy.io
+- `DATABASE_URL` — use the Supabase session pooler connection string for local dev
+
+Important notes:
+- The API loads the repo root [/.env](/home/mafita/amara/.env)
+- Blank `apps/api/.env` values do not need to be edited for normal local development
+- Prefer the Supabase session pooler host (`*.pooler.supabase.com`) over the direct `db.<project-ref>.supabase.co` host if your environment does not have working IPv6 routing
+- Put the actual DB password inline in `DATABASE_URL`; `dotenv` will not expand `${DATABASE_PASSWORD}` automatically
 
 ### Run (development)
 

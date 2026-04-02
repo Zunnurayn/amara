@@ -10,13 +10,28 @@ import {
 } from '@lifi/sdk'
 import type { WalletClient } from 'viem'
 
-// Initialize LI.FI SDK
 const lifiConfig = {
   integrator: 'anara-wallet',
   providers: [EVM()],
 }
 
-createConfig(lifiConfig)
+let lifiConfigured = false
+
+function configureLifi(config = lifiConfig) {
+  try {
+    createConfig(config)
+    lifiConfigured = true
+  } catch (error) {
+    lifiConfigured = false
+    console.error('[lifi] sdk configuration failed', error)
+  }
+}
+
+function ensureLifiConfigured() {
+  if (!lifiConfigured) {
+    configureLifi()
+  }
+}
 
 export interface SwapParams {
   fromChainId: number
@@ -33,6 +48,7 @@ export interface BridgeParams extends SwapParams {
 }
 
 export async function getSwapQuote(params: SwapParams) {
+  ensureLifiConfigured()
   const quote = await getQuote({
     fromChain: params.fromChainId,
     toChain: params.toChainId,
@@ -51,12 +67,13 @@ export async function executeSwap(
   getWalletClient: (chainId: number) => Promise<WalletClient>,
   onRouteUpdate?: (route: RouteExtended) => void
 ) {
+  ensureLifiConfigured()
   const normalizedRoute = isRoute(route) ? route : convertQuoteToRoute(route, {
     adjustZeroOutputFromPreviousStep: true,
   })
   const initialChainId = normalizedRoute.steps[0]?.action.fromChainId ?? normalizedRoute.fromChainId
 
-  createConfig({
+  configureLifi({
     ...lifiConfig,
     providers: [
       EVM({

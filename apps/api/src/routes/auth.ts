@@ -2,6 +2,7 @@ import { Router } from 'express'
 import { z } from 'zod'
 import { requireAuth, type AuthenticatedRequest } from '../middleware/auth'
 import { getAgentSettings, upsertUser } from '../db/client'
+import { getAuthorizedWalletAddress, isAuthorizationError } from '../lib/authz'
 
 export const authRouter = Router()
 
@@ -12,7 +13,7 @@ const SyncUserSchema = z.object({
 authRouter.post('/sync', requireAuth, async (req: AuthenticatedRequest, res) => {
   try {
     const body = SyncUserSchema.parse(req.body ?? {})
-    const walletAddress = body.walletAddress ?? req.walletAddress
+    const walletAddress = getAuthorizedWalletAddress(req.walletAddress, body.walletAddress)
 
     const user = await upsertUser(req.userId!, walletAddress)
     if (!user) {
@@ -35,6 +36,9 @@ authRouter.post('/sync', requireAuth, async (req: AuthenticatedRequest, res) => 
   } catch (err) {
     if (err instanceof z.ZodError) {
       return res.status(400).json({ error: 'Invalid sync payload', details: err.errors })
+    }
+    if (err instanceof Error && isAuthorizationError(err)) {
+      return res.status(403).json({ error: err.message })
     }
 
     console.error('[auth sync]', err)

@@ -43,6 +43,9 @@ CREATE TABLE IF NOT EXISTS agent_settings (
   daily_spend_limit_usd   NUMERIC(12,2) NOT NULL DEFAULT 5000,
   max_trade_size_usd      NUMERIC(12,2) NOT NULL DEFAULT 2000,
   require_approval_above  NUMERIC(12,2) NOT NULL DEFAULT 500,
+  allow_swaps            BOOLEAN NOT NULL DEFAULT TRUE,
+  allow_bridges          BOOLEAN NOT NULL DEFAULT TRUE,
+  allow_sends            BOOLEAN NOT NULL DEFAULT TRUE,
   -- per-strategy toggles
   arb_enabled             BOOLEAN NOT NULL DEFAULT TRUE,
   yield_enabled           BOOLEAN NOT NULL DEFAULT TRUE,
@@ -63,7 +66,7 @@ CREATE TABLE IF NOT EXISTS agent_settings (
 CREATE TABLE IF NOT EXISTS agent_executions (
   id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   user_id         UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  strategy_type   TEXT NOT NULL CHECK (strategy_type IN ('arb','yield','rebalance','brickt','send','receive','custom')),
+  strategy_type   TEXT NOT NULL CHECK (strategy_type IN ('arb','yield','rebalance','brickt','send','receive','swap','bridge','custom')),
   status          TEXT NOT NULL CHECK (status IN ('success','skipped','failed','pending')),
   description     TEXT NOT NULL,
   tx_hash         TEXT,
@@ -110,7 +113,8 @@ CREATE TABLE IF NOT EXISTS transactions (
   to_chain_id     INTEGER,
   bridge_protocol TEXT,
   created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  confirmed_at    TIMESTAMPTZ
+  confirmed_at    TIMESTAMPTZ,
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX idx_txns_user_id    ON transactions(user_id);
@@ -118,6 +122,17 @@ CREATE INDEX idx_txns_chain      ON transactions(chain_id);
 CREATE INDEX idx_txns_status     ON transactions(status);
 CREATE INDEX idx_txns_created    ON transactions(created_at DESC);
 CREATE UNIQUE INDEX idx_txns_hash ON transactions(tx_hash, chain_id);
+
+-- Keep older databases aligned with the current API expectations.
+ALTER TABLE transactions
+  ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+
+ALTER TABLE agent_executions
+  DROP CONSTRAINT IF EXISTS agent_executions_strategy_type_check;
+
+ALTER TABLE agent_executions
+  ADD CONSTRAINT agent_executions_strategy_type_check
+  CHECK (strategy_type IN ('arb','yield','rebalance','brickt','send','receive','swap','bridge','custom'));
 
 -- ─────────────────────────────────────────────────────────────────
 -- SAVED CONTACTS

@@ -1,6 +1,6 @@
 import { Router } from 'express'
 import { buildPortfolio } from '../services/portfolio'
-import { getRecentTransactions } from '../services/transactions'
+import { getRecentTransactionsWithDebug } from '../services/transactions'
 import { getStoredTransactions, getUserByWalletAddress, savePortfolioSnapshot, saveTransaction } from '../db/client'
 import type { Transaction } from '@anara/types'
 
@@ -28,27 +28,70 @@ walletRouter.get('/:address/portfolio', async (req, res) => {
       nfts: portfolio.nfts ?? [],
       chains: portfolio.chains ?? [],
       lastUpdated: portfolio.lastUpdated,
+      warnings: portfolio.warnings ?? [],
     })
   } catch (err) {
     console.error('[portfolio]', err)
-    res.status(500).json({ error: 'Failed to build portfolio' })
+    res.status(200).json({
+      address,
+      totalUsd: '$0.00',
+      change24h: '+$0.00',
+      tokens: [],
+      nfts: [],
+      chains: [
+        { chainId: 8453, nativeBalance: '0', totalUsd: '$0.00' },
+        { chainId: 1, nativeBalance: '0', totalUsd: '$0.00' },
+      ],
+      lastUpdated: Date.now(),
+      warnings: [
+        err instanceof Error ? err.message : 'Failed to build portfolio',
+      ],
+    })
   }
 })
 
 // GET /api/wallet/:address/transactions
 walletRouter.get('/:address/transactions', async (req, res) => {
   const { address } = req.params
-  const { chainId, limit = '20', offset = '0' } = req.query
+  const { chainId, limit = '20', offset = '0', debug } = req.query
   try {
-    const chain = chainId ? Number(chainId) : 8453
     const lim = Math.min(Math.max(Number(limit) || 20, 1), 50)
-
-    const txs = await getRecentTransactions(address, chain, lim)
+    const requestedChainId = typeof chainId === 'string' ? Number(chainId) : undefined
+    const chainIds = typeof requestedChainId === 'number' && Number.isFinite(requestedChainId)
+      ? [requestedChainId]
+      : [8453, 1]
+    const chainTxResults = await Promise.allSettled(
+      chainIds.map((currentChainId) => getRecentTransactionsWithDebug(address, currentChainId, lim))
+    )
+    const txs = chainTxResults
+      .flatMap((result) => (result.status === 'fulfilled' ? result.value.transactions : []))
+      .sort((left, right) => right.timestamp - left.timestamp)
+      .slice(0, lim)
+    const debugSummary = chainTxResults
+      .flatMap((result, index) => {
+        if (result.status === 'fulfilled') return [result.value.debug]
+        return [{
+          chainId: chainIds[index] ?? 0,
+          alchemyOutgoing: 'rejected',
+          alchemyIncoming: 'rejected',
+          alchemyMerged: 0,
+          explorerNormal: 'rejected',
+          explorerToken: 'rejected',
+          finalCount: 0,
+          error: result.reason instanceof Error ? result.reason.message : String(result.reason),
+        }]
+      })
+    const chainWarnings = chainTxResults
+      .flatMap((result, index) =>
+        result.status === 'rejected'
+          ? [`chain ${chainIds[index]}: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`]
+          : []
+      )
     const user = await getUserByWalletAddress(address)
-    let mergedTxs = txs
+    let mergedTxs = mergeTransactions(txs, []).slice(0, lim)
 
     if (user) {
-      const stored = await getStoredTransactions(user.id, chain, lim)
+      const stored = await getStoredTransactions(user.id, chainIds.length === 1 ? chainIds[0] : undefined, lim)
       await Promise.allSettled(txs.map((tx: Transaction) => saveTransaction(user.id, {
         txHash:        tx.hash,
         chainId:       tx.chainId,
@@ -94,10 +137,21 @@ walletRouter.get('/:address/transactions', async (req, res) => {
       total: mergedTxs.length,
       limit: lim,
       offset: Number(offset) || 0,
+      warnings: chainWarnings,
+      debug: debug === '1' ? debugSummary : undefined,
     })
   } catch (err) {
     console.error('[transactions]', err)
-    res.status(500).json({ error: 'Failed to fetch transactions' })
+    res.status(200).json({
+      address,
+      transactions: [],
+      total: 0,
+      limit: Math.min(Math.max(Number(limit) || 20, 1), 50),
+      offset: Number(offset) || 0,
+      warnings: [
+        err instanceof Error ? err.message : 'Failed to fetch transactions',
+      ],
+    })
   }
 })
 

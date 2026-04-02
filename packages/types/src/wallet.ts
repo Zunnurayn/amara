@@ -9,8 +9,24 @@ export interface WalletBalance {
   address: `0x${string}`
   chainId: number
   tokens: TokenBalance[]
+  nfts?: WalletNftSummary[]
+  chains?: WalletChainSummary[]
   totalUsd: string
   lastUpdated: number
+}
+
+export interface WalletNftSummary {
+  tokenId: string
+  collection: string
+  name?: string
+  chain: 'base' | 'ethereum' | string
+  imageUrl?: string
+}
+
+export interface WalletChainSummary {
+  chainId: number
+  nativeBalance: string
+  totalUsd: string
 }
 
 export interface TokenBalance {

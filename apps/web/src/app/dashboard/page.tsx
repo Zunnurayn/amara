@@ -8,12 +8,13 @@ import { useWalletStore, useAgentStore, useUIStore } from '../../store'
 import { useAgent } from '../../hooks/useAgent'
 import { resolveWalletIdentity } from '../../lib/wallet'
 import { useAuth } from '../../lib/auth'
+import type { WalletChainSummary, WalletNftSummary } from '@anara/types'
 
 export default function DashboardPage() {
   const { ready, authenticated, user, logout } = useAuth()
   const router  = useRouter()
   const { fetchBrief, fetchStatus, refreshWallet } = useAgent()
-  const { totalUsd, tokens, transactions, isLoading, error, hasWallet, lastUpdated, setAddress, setHasWallet } = useWalletStore()
+  const { totalUsd, tokens, nfts, chains, transactions, isLoading, error, hasWallet, lastUpdated, setAddress, setHasWallet } = useWalletStore()
   const { state: agentState, brief, setChatOpen } = useAgentStore()
   const [showBrief, setShowBrief]   = useState(true)
   const [activeTab, setActiveTab]   = useState<'activity' | 'assets' | 'nfts'>('activity')
@@ -55,7 +56,7 @@ export default function DashboardPage() {
           <AnaraLogo size={32} />
           <div>
             <div className="font-display font-black text-lg leading-tight">Anara</div>
-            <div className="text-[9px] text-muted tracking-widest uppercase">Autonomous · Multichain</div>
+            <div className="text-[9px] text-muted tracking-widest uppercase">Assisted · Base + Ethereum</div>
           </div>
         </div>
 
@@ -66,10 +67,14 @@ export default function DashboardPage() {
               onClick={() => setChainOpen(v => !v)}
               className="flex items-center gap-1.5 bg-clay border border-border px-2.5 py-1.5 text-[9px] font-bold font-mono tracking-wide text-text2 hover:border-border2 transition-colors"
             >
-              <span style={{ background: colors.chains.base }} className="inline-block w-2 h-2 rounded-full" />
-              <span style={{ background: colors.chains.eth }} className="inline-block w-2 h-2 rounded-full" />
-              <span style={{ background: colors.chains.arb }} className="inline-block w-2 h-2 rounded-full" />
-              <span className="ml-1">10 chains ▾</span>
+              {chains.slice(0, 3).map((chain) => (
+                <span
+                  key={chain.chainId}
+                  style={{ background: chain.chainId === 1 ? colors.chains.eth : colors.chains.base }}
+                  className="inline-block w-2 h-2 rounded-full"
+                />
+              ))}
+              <span className="ml-1">{Math.max(chains.length, 1)} {chains.length === 1 ? 'chain' : 'chains'} ▾</span>
             </button>
             {chainOpen && (
               <>
@@ -82,7 +87,7 @@ export default function DashboardPage() {
           {/* Live agent pip */}
           <div className="flex items-center gap-1.5 border border-green/25 bg-green/5 px-3 py-1.5">
             <LiveDot />
-            <span className="text-[9px] font-bold text-green tracking-widest uppercase">Agent Live</span>
+            <span className="text-[9px] font-bold text-green tracking-widest uppercase">Agent Ready</span>
           </div>
 
           {/* Avatar / logout */}
@@ -118,7 +123,7 @@ export default function DashboardPage() {
         )}
 
         {/* Portfolio hero */}
-        <PortfolioHero totalUsd={totalUsd || '$24,847.32'} />
+        <PortfolioHero totalUsd={totalUsd} chains={chains} tokenCount={tokens.length} nftCount={nfts.length} />
 
         {/* Proverb ticker */}
         <div className="flex items-center gap-3 bg-clay border-x border-b border-border px-4 py-2 overflow-hidden">
@@ -143,7 +148,7 @@ export default function DashboardPage() {
           <div className="text-[9px] font-bold tracking-[0.2em] text-muted uppercase mb-3">Wallet</div>
           <Card kente>
             {/* Tab bar */}
-            <div className="flex bg-clay border-b border-border">
+            <div className="sticky top-0 z-10 flex bg-clay border-b border-border">
               {(['activity', 'assets', 'nfts'] as const).map(tab => (
                 <button
                   key={tab}
@@ -160,10 +165,10 @@ export default function DashboardPage() {
             </div>
 
             {/* Tab content */}
-            <div className="min-h-[200px]">
+            <div className="min-h-[200px] max-h-[26rem] md:max-h-[34rem] overflow-y-auto overscroll-contain">
               {activeTab === 'activity' && <ActivityTab transactions={transactions} isLoading={isLoading} error={error} />}
               {activeTab === 'assets'   && <AssetsTab tokens={tokens} />}
-              {activeTab === 'nfts'     && <NFTsTab />}
+              {activeTab === 'nfts'     && <NFTsTab nfts={nfts} isLoading={isLoading} error={error} />}
             </div>
           </Card>
         </div>
@@ -171,10 +176,10 @@ export default function DashboardPage() {
         {/* Agent stats */}
         <div className="px-4 pt-4">
           <StatGrid stats={[
-            { label: 'Actions today',  value: String(agentState.actionsToday || 23) },
-            { label: 'Profit today',   value: agentState.profitToday || '+$70.50', color: colors.green },
-            { label: 'Errors',         value: String(agentState.errorsToday || 0),  color: colors.green },
-            { label: 'Uptime',         value: '99.9%', color: colors.teal },
+            { label: 'Actions today',  value: String(agentState.actionsToday || 0) },
+            { label: 'Profit today',   value: agentState.profitToday || '$0.00', color: colors.green },
+            { label: 'Errors',         value: String(agentState.errorsToday || 0),  color: agentState.errorsToday ? colors.kola : colors.green },
+            { label: 'Wallet assets',  value: String(tokens.length + nfts.length), color: colors.teal },
           ]} />
         </div>
 
@@ -313,8 +318,20 @@ function BriefModal({ brief, onDismiss }: { brief: Brief; onDismiss: () => void 
   )
 }
 
-function PortfolioHero({ totalUsd }: { totalUsd: string }) {
+function PortfolioHero({
+  totalUsd,
+  chains,
+  tokenCount,
+  nftCount,
+}: {
+  totalUsd: string
+  chains: WalletChainSummary[]
+  tokenCount: number
+  nftCount: number
+}) {
   const { openSheet } = useUIStore()
+  const chainBreakdown = chains.filter((chain) => parseUsdAmount(chain.totalUsd) > 0)
+  const totalValue = Math.max(parseUsdAmount(totalUsd), 0.01)
   return (
     <Card kente className="mx-4 mt-3">
       <div className="p-4">
@@ -325,17 +342,19 @@ function PortfolioHero({ totalUsd }: { totalUsd: string }) {
           <span className="text-2xl text-muted font-bold">.{totalUsd.split('.')[1] ?? '00'}</span>
         </div>
         <div className="flex items-center gap-2 mt-2.5">
-          <span className="bg-green/10 border border-green/20 text-green text-[10px] font-bold font-mono px-2.5 py-1">▲ +$312.48 (1.27%)</span>
-          <span className="text-[10px] text-muted">since yesterday</span>
+          <span className="bg-clay border border-border text-text2 text-[10px] font-bold font-mono px-2.5 py-1">
+            {chains.length} active {chains.length === 1 ? 'chain' : 'chains'}
+          </span>
+          <span className="text-[10px] text-muted">{tokenCount} tokens · {nftCount} NFTs</span>
         </div>
       </div>
 
       {/* Stats row */}
       <div className="flex border-t border-border">
         {[
-          { label: 'Arb 30d',  value: '+$847',  color: colors.gold2 },
-          { label: 'Yield APY',value: '18.4%',  color: colors.teal  },
-          { label: 'Brickt',   value: '4',      color: '#C8956A'    },
+          { label: 'Base',      value: formatChainTotal(chains, 8453),  color: colors.chains.base },
+          { label: 'Ethereum',  value: formatChainTotal(chains, 1),     color: colors.chains.eth  },
+          { label: 'Assets',    value: String(tokenCount + nftCount),   color: colors.gold2       },
         ].map((s, i) => (
           <div key={s.label} className={`flex-1 p-3 ${i < 2 ? 'border-r border-border' : ''}`}>
             <div className="font-display font-bold text-lg" style={{ color: s.color }}>{s.value}</div>
@@ -366,8 +385,18 @@ function PortfolioHero({ totalUsd }: { totalUsd: string }) {
 
       {/* Chain bar */}
       <div className="flex h-1">
-        <div className="flex-1 bg-[#1C6EFF]" style={{ flex: 62 }} />
-        <div className="flex-1 bg-[#627EEA]" style={{ flex: 38 }} />
+        {chainBreakdown.length ? chainBreakdown.map((chain) => (
+          <div
+            key={chain.chainId}
+            className="flex-1"
+            style={{
+              flex: parseUsdAmount(chain.totalUsd) / totalValue,
+              background: chain.chainId === 1 ? colors.chains.eth : colors.chains.base,
+            }}
+          />
+        )) : (
+          <div className="flex-1 bg-clay" />
+        )}
       </div>
     </Card>
   )
@@ -420,9 +449,9 @@ function ActivityTab({ transactions, isLoading, error }: { transactions: any[]; 
             item.type === 'send' ? 'bg-kola/15 border-kola/20' :
             item.type === 'receive' ? 'bg-green/10 border-green/20' :
             'bg-teal/10 border-teal/20'
-          }`}>{item.type === 'send' ? '↑' : item.type === 'receive' ? '↓' : '⇄'}</div>
+          }`}>{item.type === 'send' ? '↑' : item.type === 'receive' ? '↓' : '⌘'}</div>
           <div className="flex-1">
-            <div className="text-[12px] text-cream">{item.valueFormatted ?? item.type}</div>
+            <div className="text-[12px] text-cream">{formatActivityLabel(item)}</div>
             <div className="text-[10px] text-muted font-mono mt-1">
               {item.hash ? `${item.hash.slice(0, 10)}…${item.hash.slice(-4)}` : 'Pending hash'}
               {' · '}
@@ -478,8 +507,31 @@ function AssetsTab({ tokens }: { tokens: any[] }) {
   )
 }
 
-function NFTsTab() {
-  return <EmptyTabState message="NFT collection view is not wired yet. Portfolio and agent execution are the primary web flows in this phase." />
+function NFTsTab({ nfts, isLoading, error }: { nfts: WalletNftSummary[]; isLoading: boolean; error: string | null }) {
+  if (isLoading) return <EmptyTabState message="Loading NFT collection…" />
+  if (error && !nfts.length) return <EmptyTabState message={error} />
+  if (!nfts.length) return <EmptyTabState message="No NFTs found for this wallet yet." />
+
+  return (
+    <div className="grid grid-cols-2 gap-3 p-4">
+      {nfts.map((nft) => (
+        <div key={`${nft.chain}:${nft.tokenId}:${nft.collection}`} className="overflow-hidden border border-border bg-clay/30">
+          <div className="aspect-square bg-clay border-b border-border flex items-center justify-center overflow-hidden">
+            <NftArtwork nft={nft} />
+          </div>
+          <div className="p-3">
+            <div className="text-[11px] font-bold text-text2 truncate">{nft.name ?? `#${nft.tokenId}`}</div>
+            <div className="text-[10px] text-muted truncate mt-1">{nft.collection}</div>
+            <div className="mt-2">
+              <Badge variant="chain" color={nft.chain === 'ethereum' ? colors.chains.eth : colors.chains.base}>
+                {nft.chain}
+              </Badge>
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  )
 }
 
 function EmptyTabState({ message }: { message: string }) {
@@ -505,18 +557,57 @@ function parseUsdAmount(value?: string) {
   return Number.parseFloat(value.replace(/[$,]/g, '')) || 0
 }
 
+function formatActivityLabel(item: any) {
+  if (item.type === 'contract') {
+    const raw = String(item.valueFormatted ?? '').trim()
+    return raw && raw !== '0 ETH' ? raw : 'Contract interaction'
+  }
+  return item.valueFormatted ?? item.type
+}
+
+function formatChainTotal(chains: WalletChainSummary[], chainId: number) {
+  const chain = chains.find((entry) => entry.chainId === chainId)
+  return chain?.totalUsd ?? '$0.00'
+}
+
+function NftArtwork({ nft }: { nft: WalletNftSummary }) {
+  const [imageFailed, setImageFailed] = useState(false)
+  const hasImage = Boolean(nft.imageUrl && !imageFailed)
+  const initials = (nft.collection || nft.name || 'NFT')
+    .replace(/[^A-Za-z0-9 ]/g, '')
+    .trim()
+    .slice(0, 2)
+    .toUpperCase() || 'NFT'
+
+  if (hasImage) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={nft.imageUrl}
+        alt={nft.name ?? nft.collection}
+        className="h-full w-full object-cover"
+        onError={() => setImageFailed(true)}
+      />
+    )
+  }
+
+  return (
+    <div
+      className="flex h-full w-full items-center justify-center text-[1.4rem] font-display font-black tracking-[0.18em]"
+      style={{
+        background: `linear-gradient(135deg, ${colors.clay2} 0%, ${colors.earth} 100%)`,
+        color: nft.chain === 'ethereum' ? colors.chains.eth : colors.chains.base,
+      }}
+    >
+      {initials}
+    </div>
+  )
+}
+
 function ChainMenu() {
   const chains = [
     { name: 'Base',      sub: 'L2 · Coinbase', color: colors.chains.base,  active: true  },
     { name: 'Ethereum',  sub: 'L1 · Mainnet',  color: colors.chains.eth,   active: true  },
-    { name: 'Arbitrum',  sub: 'L2 · Offchain', color: colors.chains.arb,   active: true  },
-    { name: 'Optimism',  sub: 'L2 · OP Stack', color: colors.chains.op,    active: true  },
-    { name: 'BNB Chain', sub: 'L1 · Binance',  color: colors.chains.bnb,   active: false },
-    { name: 'Polygon',   sub: 'L2 · PoS',      color: colors.chains.poly,  active: false },
-    { name: 'Avalanche', sub: 'L1 · Ava Labs', color: colors.chains.avax,  active: false },
-    { name: 'Solana',    sub: 'L1 · SVM',      color: colors.chains.sol,   active: false },
-    { name: 'zkSync',    sub: 'L2 · ZK Rollup',color: colors.chains.zk,    active: false },
-    { name: 'Linea',     sub: 'L2 · Consensys',color: colors.chains.linea, active: false },
   ]
   return (
     <div className="absolute top-full right-0 mt-1.5 w-56 bg-soil border border-border z-20 shadow-dark">

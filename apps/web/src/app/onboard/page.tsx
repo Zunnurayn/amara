@@ -7,9 +7,9 @@ import { colors } from '../../lib/ui-tokens'
 import { useAuth } from '../../lib/auth'
 
 const FEATURES = [
-  { icon: '🤖', title: 'Autonomous Agent',    body: 'Executes arbitrage, yield compounding, and rebalancing 24/7 — no approvals needed.' },
-  { icon: '⛓',  title: '10 Chains',           body: 'Base, Ethereum, Arbitrum, Optimism, BNB, Polygon, Avalanche, Solana, zkSync, Linea.' },
-  { icon: '💬', title: 'Natural Language',     body: '"Swap 0.5 ETH to USDC" — or say it out loud. The agent handles execution.' },
+  { icon: '🤖', title: 'AI Wallet Copilot',   body: 'Previews swaps, sends, and bridges with clear confirmations before execution.' },
+  { icon: '⛓',  title: 'Base + Ethereum',     body: 'Start on the chains that already work end-to-end in the current product.' },
+  { icon: '💬', title: 'Natural Language',     body: '"Swap 0.5 ETH to USDC" and get a live route preview before you confirm.' },
   { icon: '🏗️', title: 'Real Estate Pools',   body: 'Invest in tokenized Nigerian and West African properties via Brickt.' },
 ]
 
@@ -59,12 +59,12 @@ export default function OnboardPage() {
         </div>
 
         <h1 className="font-display font-black text-5xl leading-tight mb-4">
-          The World's First<br />
-          <span className="text-gold2">Autonomous</span> Wallet
+          AI-Assisted<br />
+          <span className="text-gold2">Multichain</span> Wallet
         </h1>
 
         <p className="text-muted text-lg leading-relaxed mb-10 max-w-md">
-          Your agent executes DeFi strategies, manages 10 chains, and briefs you on everything it did — while you live your life.
+          Chat with your wallet, review live route previews, and confirm swaps, sends, and bridges on Base and Ethereum.
         </p>
 
         {/* Auth options */}
@@ -122,7 +122,7 @@ export default function OnboardPage() {
       <footer className="border-t border-border px-6 py-4 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <AnaraLogo size={16} />
-          <span className="text-[10px] text-muted font-mono">v0.1.0 · Base · Autonomous</span>
+          <span className="text-[10px] text-muted font-mono">v0.1.0 · Base + Ethereum · Assisted</span>
         </div>
         <span className="text-[10px] text-muted italic">
           "The wealth of a man is not in his pocket, but in the land he cultivates."

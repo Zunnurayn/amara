@@ -1,49 +1,198 @@
 import { Router } from 'express'
 import { z } from 'zod'
-import { toggleStrategy, getStrategyStatus } from '@anara/agent'
-import { getAgentSettings, getUserByWalletAddress, setStrategyEnabled } from '../db/client'
+import {
+  getAgentSettings,
+  getUserByPrivyId,
+  setStrategyEnabled,
+  updateAgentSettings,
+  upsertUser,
+} from '../db/client'
+import { requireAuth, type AuthenticatedRequest } from '../middleware/auth'
 
 export const strategyRouter = Router()
 
-strategyRouter.get('/', async (req, res) => {
-  const walletAddress = typeof req.query.walletAddress === 'string' ? req.query.walletAddress : null
-  const user = walletAddress ? await getUserByWalletAddress(walletAddress) : null
-  const settings = user ? await getAgentSettings(user.id) : null
+strategyRouter.use(requireAuth)
 
-  res.json({
-    strategies: [
-      { id: 'arb',       name: 'Arb Bot',         status: settings?.arb_enabled === false ? 'paused' : 'active',   pnl: '+$847.32', type: 'arb' },
-      { id: 'yield',     name: 'Yield Optimizer', status: settings?.yield_enabled === false ? 'paused' : 'active', pnl: '+$312.10', type: 'yield' },
-      { id: 'rebalance', name: 'Auto-Rebalance',  status: settings?.rebalance_enabled === false ? 'paused' : 'watching', pnl: 'In Range', type: 'rebalance' },
-      { id: 'brickt',    name: 'Brickt Pools',    status: settings?.brickt_enabled === false ? 'paused' : 'active', pnl: '+$64.00', type: 'brickt' },
-    ],
-  })
-})
+const strategyCatalog = [
+  { id: 'arb', name: 'Arb Bot', defaultStatus: 'active', pnl: '+$847.32', type: 'arb' },
+  { id: 'yield', name: 'Yield Optimizer', defaultStatus: 'active', pnl: '+$312.10', type: 'yield' },
+  { id: 'rebalance', name: 'Auto-Rebalance', defaultStatus: 'watching', pnl: 'In Range', type: 'rebalance' },
+  { id: 'brickt', name: 'Brickt Pools', defaultStatus: 'active', pnl: '+$64.00', type: 'brickt' },
+] as const
 
-strategyRouter.get('/:id', async (req, res) => {
-  const status = await getStrategyStatus(req.params.id)
-  if (!status) return res.status(404).json({ error: 'Strategy not found' })
-  res.json(status)
-})
+type StrategyId = typeof strategyCatalog[number]['id']
+
+const strategyFieldMap = {
+  arb: 'arb_enabled',
+  yield: 'yield_enabled',
+  rebalance: 'rebalance_enabled',
+  brickt: 'brickt_enabled',
+} as const
+
+const strategyDetailCopy: Record<string, Record<string, string | number | boolean>> = {
+  arb: {
+    mode: 'Cross-venue spread capture',
+    markets: 'Base + Ethereum',
+    approvalsRequired: true,
+  },
+  yield: {
+    mode: 'Yield monitoring',
+    markets: 'Base + Ethereum',
+    approvalsRequired: true,
+  },
+  rebalance: {
+    mode: 'Portfolio drift control',
+    markets: 'Base + Ethereum',
+    approvalsRequired: true,
+  },
+  brickt: {
+    mode: 'Brickt pool monitoring',
+    markets: 'Base only',
+    approvalsRequired: true,
+  },
+}
 
 const ToggleSchema = z.object({
   action: z.enum(['pause', 'resume']),
-  walletAddress: z.string().regex(/^0x[a-fA-F0-9]{40}$/).optional(),
 })
 
-strategyRouter.post('/:id/toggle', async (req, res) => {
+const SettingsSchema = z.object({
+  autoExecute: z.boolean().optional(),
+  requireApprovalAbove: z.number().finite().nonnegative().max(1_000_000).optional(),
+  allowSwaps: z.boolean().optional(),
+  allowBridges: z.boolean().optional(),
+  allowSends: z.boolean().optional(),
+})
+
+strategyRouter.get('/', async (req: AuthenticatedRequest, res) => {
   try {
-    const { action, walletAddress } = ToggleSchema.parse(req.body)
-    if (walletAddress) {
-      const user = await getUserByWalletAddress(walletAddress)
-      if (user) {
-        await setStrategyEnabled(user.id, req.params.id, action === 'resume')
-      }
+    const user = await getOrCreateAuthenticatedUser(req)
+    const settings = await getAgentSettings(user.id)
+
+    res.json({
+      strategies: strategyCatalog.map((strategy) => ({
+        id: strategy.id,
+        name: strategy.name,
+        status: settings[strategyFieldMap[strategy.id]] === false ? 'paused' : strategy.defaultStatus,
+        pnl: strategy.pnl,
+        type: strategy.type,
+      })),
+      settings: serializeSettings(settings),
+    })
+  } catch (err) {
+    console.error('[strategy list]', err)
+    res.status(500).json({ error: 'Failed to load strategies' })
+  }
+})
+
+strategyRouter.get('/:id', async (req: AuthenticatedRequest, res) => {
+  try {
+    const strategyId = normalizeStrategyId(req.params.id)
+    if (!strategyId) {
+      return res.status(404).json({ error: 'Strategy not found' })
     }
-    const result = await toggleStrategy(req.params.id, action)
-    res.json(result)
+    const strategy = strategyCatalog.find((entry) => entry.id === strategyId)
+    if (!strategy) {
+      return res.status(404).json({ error: 'Strategy not found' })
+    }
+
+    const user = await getOrCreateAuthenticatedUser(req)
+    const settings = await getAgentSettings(user.id)
+    const status = settings[strategyFieldMap[strategy.id]] === false ? 'paused' : strategy.defaultStatus
+
+    res.json({
+      id: strategy.id,
+      name: strategy.name,
+      status,
+      type: strategy.type,
+      pnl: strategy.pnl,
+      settings: serializeSettings(settings),
+      details: strategyDetailCopy[strategy.id] ?? {},
+    })
+  } catch (err) {
+    console.error('[strategy detail]', err)
+    res.status(500).json({ error: 'Failed to load strategy' })
+  }
+})
+
+strategyRouter.post('/:id/toggle', async (req: AuthenticatedRequest, res) => {
+  try {
+    const strategyId = normalizeStrategyId(req.params.id)
+    if (!strategyId || !strategyCatalog.some((entry) => entry.id === strategyId)) {
+      return res.status(404).json({ error: 'Strategy not found' })
+    }
+
+    const { action } = ToggleSchema.parse(req.body)
+    const user = await getOrCreateAuthenticatedUser(req)
+    const settings = await setStrategyEnabled(user.id, strategyId, action === 'resume')
+    const strategy = strategyCatalog.find((entry) => entry.id === strategyId)!
+
+    res.json({
+      success: true,
+      strategyId,
+      newStatus: settings?.[strategyFieldMap[strategyId]] === false ? 'paused' : strategy.defaultStatus,
+      settings: settings ? serializeSettings(settings) : null,
+    })
   } catch (err) {
     if (err instanceof z.ZodError) return res.status(400).json({ error: 'Invalid action' })
+    console.error('[strategy toggle]', err)
     res.status(500).json({ error: 'Failed to toggle strategy' })
   }
 })
+
+strategyRouter.post('/settings', async (req: AuthenticatedRequest, res) => {
+  try {
+    const body = SettingsSchema.parse(req.body ?? {})
+    const user = await getOrCreateAuthenticatedUser(req)
+    const settings = await updateAgentSettings(user.id, {
+      auto_execute: body.autoExecute,
+      require_approval_above: body.requireApprovalAbove,
+      allow_swaps: body.allowSwaps,
+      allow_bridges: body.allowBridges,
+      allow_sends: body.allowSends,
+    })
+
+    res.json({
+      success: true,
+      settings: serializeSettings(settings),
+    })
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return res.status(400).json({ error: 'Invalid settings payload', details: err.errors })
+    }
+    console.error('[strategy settings]', err)
+    res.status(500).json({ error: 'Failed to update strategy settings' })
+  }
+})
+
+async function getOrCreateAuthenticatedUser(req: AuthenticatedRequest) {
+  const existing = req.userId ? await getUserByPrivyId(req.userId) : null
+  if (existing) return existing
+
+  const created = await upsertUser(req.userId!, req.walletAddress)
+  if (!created) {
+    throw new Error('Authenticated user could not be resolved')
+  }
+  return created
+}
+
+function normalizeStrategyId(value?: string): StrategyId | null {
+  if (!value) return null
+  if (value === 'reb') return 'rebalance'
+  return strategyCatalog.some((entry) => entry.id === value) ? (value as StrategyId) : null
+}
+
+function serializeSettings(settings: Awaited<ReturnType<typeof getAgentSettings>>) {
+  return {
+    autoExecute: settings.auto_execute,
+    executionCapUsd: Number(settings.require_approval_above),
+    allowSwaps: settings.allow_swaps ?? true,
+    allowBridges: settings.allow_bridges ?? true,
+    allowSends: settings.allow_sends ?? true,
+    arbEnabled: settings.arb_enabled,
+    yieldEnabled: settings.yield_enabled,
+    rebalanceEnabled: settings.rebalance_enabled,
+    bricktEnabled: settings.brickt_enabled,
+    updatedAt: settings.updated_at,
+  }
+}

@@ -45,6 +45,8 @@ npm-debug.log*
 # Turbo
 .turbo
 
+.codex
+
 # React Native (bare)
 **/android/.gradle
 **/android/.idea
