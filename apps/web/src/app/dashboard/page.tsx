@@ -20,7 +20,7 @@ export default function DashboardPage() {
   const { state: agentState, brief, setChatOpen } = useAgentStore()
   const { activeSheet, closeSheet } = useUIStore()
   const [showBrief, setShowBrief]   = useState(true)
-  const [activeTab, setActiveTab]   = useState<'activity' | 'assets' | 'nfts'>('activity')
+  const [activeTab, setActiveTab]   = useState<'activity' | 'assets' | 'nfts'>('assets')
   const [chainOpen, setChainOpen]   = useState(false)
   const [trackedDashboardLoad, setTrackedDashboardLoad] = useState(false)
 
@@ -180,7 +180,7 @@ export default function DashboardPage() {
           <Card kente>
             {/* Tab bar */}
             <div className="sticky top-0 z-10 flex bg-clay border-b border-border">
-              {(['activity', 'assets', 'nfts'] as const).map(tab => (
+              {(['assets', 'activity', 'nfts'] as const).map(tab => (
                 <button
                   key={tab}
                   onClick={() => setActiveTab(tab)}
@@ -826,13 +826,18 @@ function StrategyCard({ id, icon, name, pnl, sub, accent, status }: typeof STRAT
 }
 
 function ActivityTab({ transactions, isLoading, error }: { transactions: any[]; isLoading: boolean; error: string | null }) {
+  const router = useRouter()
   if (isLoading) return <EmptyTabState message="Loading wallet activity…" />
   if (error && !transactions.length) return <EmptyTabState message={error} />
   if (!transactions.length) return <EmptyTabState message="No wallet activity yet." />
   return (
     <div>
       {transactions.map((item: any, i: number) => (
-        <div key={i} className="flex gap-3 items-start px-4 py-3 border-b border-border/50 last:border-b-0 hover:bg-clay/30 transition-colors">
+        <button
+          key={i}
+          onClick={() => router.push(`/dashboard/activity/${item.chainId}/${encodeURIComponent(item.hash)}`)}
+          className="w-full flex gap-3 items-start px-4 py-3 border-b border-border/50 last:border-b-0 hover:bg-clay/30 transition-colors text-left"
+        >
           <div className={`w-7 h-7 flex items-center justify-center text-xs flex-shrink-0 border ${
             item.type === 'send' ? 'bg-kola/15 border-kola/20' :
             item.type === 'receive' ? 'bg-green/10 border-green/20' :
@@ -851,17 +856,20 @@ function ActivityTab({ transactions, isLoading, error }: { transactions: any[]; 
               {item.valueUsd && <span className="text-[10px] font-bold text-green font-mono">{item.valueUsd}</span>}
             </div>
           </div>
-        </div>
+        </button>
       ))}
     </div>
   )
 }
 
 function AssetsTab({ tokens }: { tokens: any[] }) {
+  const router = useRouter()
   if (!tokens.length) return <EmptyTabState message="No token balances found for this wallet yet." />
   const assets = [...tokens]
     .sort((a: any, b: any) => parseUsdAmount(b.balanceUsd) - parseUsdAmount(a.balanceUsd))
     .map((token: any) => ({
+    address: token.address,
+    chainId: token.chainId,
     symbol: token.symbol,
     icon: String(token.symbol ?? '?').slice(0, 1),
     amount: token.balanceFormatted,
@@ -873,7 +881,11 @@ function AssetsTab({ tokens }: { tokens: any[] }) {
   return (
     <div>
       {assets.map((a: any, i: number) => (
-        <div key={i} className="flex items-center justify-between px-4 py-3 border-b border-border/50 last:border-b-0 hover:bg-clay/30 transition-colors cursor-pointer">
+        <button
+          key={i}
+          onClick={() => router.push(`/dashboard/assets/${a.chainId}/${encodeURIComponent(a.address)}`)}
+          className="w-full flex items-center justify-between px-4 py-3 border-b border-border/50 last:border-b-0 hover:bg-clay/30 transition-colors cursor-pointer text-left"
+        >
           <div className="flex items-center gap-3">
             <div
               className="w-8 h-8 flex items-center justify-center text-[10px] font-black font-mono border"
@@ -889,13 +901,14 @@ function AssetsTab({ tokens }: { tokens: any[] }) {
             <div className="text-[12px] font-bold font-mono text-text2">{a.value}</div>
             <div className="text-[9px] text-muted font-mono mt-0.5">{a.amount}</div>
           </div>
-        </div>
+        </button>
       ))}
     </div>
   )
 }
 
 function NFTsTab({ nfts, isLoading, error }: { nfts: WalletNftSummary[]; isLoading: boolean; error: string | null }) {
+  const router = useRouter()
   if (isLoading) return <EmptyTabState message="Loading NFT collection…" />
   if (error && !nfts.length) return <EmptyTabState message={error} />
   if (!nfts.length) return <EmptyTabState message="No NFTs found for this wallet yet." />
@@ -903,7 +916,11 @@ function NFTsTab({ nfts, isLoading, error }: { nfts: WalletNftSummary[]; isLoadi
   return (
     <div className="grid grid-cols-2 gap-3 p-4">
       {nfts.map((nft) => (
-        <div key={`${nft.chain}:${nft.tokenId}:${nft.collection}`} className="overflow-hidden border border-border bg-clay/30">
+        <button
+          key={`${nft.chain}:${nft.tokenId}:${nft.collection}`}
+          onClick={() => router.push(`/dashboard/nfts/${encodeURIComponent(nft.chain)}/${encodeURIComponent(nft.tokenId)}`)}
+          className="overflow-hidden border border-border bg-clay/30 text-left hover:border-border2 transition-colors"
+        >
           <div className="aspect-square bg-clay border-b border-border flex items-center justify-center overflow-hidden">
             <NftArtwork nft={nft} />
           </div>
@@ -916,7 +933,7 @@ function NFTsTab({ nfts, isLoading, error }: { nfts: WalletNftSummary[]; isLoadi
               </Badge>
             </div>
           </div>
-        </div>
+        </button>
       ))}
     </div>
   )

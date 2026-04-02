@@ -106,6 +106,10 @@ function hasUsableApiKey(value?: string) {
   return Boolean(key && key !== 'xxxxxx')
 }
 
+function shouldUseExplorerFallback(chainId: number) {
+  return chainId === 1 && hasUsableApiKey(process.env.ETHERSCAN_API_KEY)
+}
+
 async function fetchTransfers(address: string, chainId: number, direction: TransferDirection, limit: number) {
   const url = getAlchemyUrl(chainId)
   const addr = normalizeAddress(address)
@@ -173,6 +177,21 @@ export async function getRecentTransactionsWithDebug(address: string, chainId: n
   ]
 
   if (!merged.length) {
+    if (!shouldUseExplorerFallback(chainId)) {
+      return {
+        transactions: [],
+        debug: {
+          chainId,
+          alchemyOutgoing: outgoing.status === 'fulfilled' ? outgoing.value.length : formatReason(outgoing.reason),
+          alchemyIncoming: incoming.status === 'fulfilled' ? incoming.value.length : formatReason(incoming.reason),
+          alchemyMerged: 0,
+          explorerNormal: 'skipped',
+          explorerToken: 'skipped',
+          finalCount: 0,
+        },
+      }
+    }
+
     const { transactions, normalCount, tokenCount } = await fetchExplorerTransactions(address, chainId, limit)
     return {
       transactions,
