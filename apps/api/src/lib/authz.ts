@@ -14,6 +14,31 @@ export function getAuthorizedWalletAddress(authWalletAddress?: string | null, re
   return requested ?? authWallet
 }
 
+export function resolveAuthorizedWalletAddress(options: {
+  authWalletAddress?: string | null
+  persistedWalletAddress?: string | null
+  requestedWalletAddress?: string
+  allowRequestedWithoutSessionWallet?: boolean
+}) {
+  const authWallet = options.authWalletAddress ? getAddress(options.authWalletAddress) : null
+  const persistedWallet = options.persistedWalletAddress ? getAddress(options.persistedWalletAddress) : null
+  const requested = options.requestedWalletAddress ? getAddress(options.requestedWalletAddress) : null
+  const trustedWallet = authWallet ?? persistedWallet
+
+  if (trustedWallet) {
+    if (requested && requested !== trustedWallet) {
+      throw new Error('Requested wallet does not match the authenticated wallet.')
+    }
+    return requested ?? trustedWallet
+  }
+
+  if (options.allowRequestedWithoutSessionWallet && requested) {
+    return requested
+  }
+
+  throw new Error('Authenticated wallet address is missing from the session.')
+}
+
 export function isAuthorizationError(err: Error) {
   return (
     err.message.includes('Authenticated wallet address is missing') ||

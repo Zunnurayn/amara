@@ -72,7 +72,6 @@ export default function OnboardPage() {
           {[
             { method: 'email'  as const, icon: '✉️', label: 'Continue with Email' },
             { method: 'sms'    as const, icon: '📱', label: 'Continue with Phone' },
-            { method: 'google' as const, icon: '🔷', label: 'Continue with Google' },
           ].map(o => (
             <button
               key={o.method}

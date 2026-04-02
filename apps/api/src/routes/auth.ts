@@ -2,7 +2,7 @@ import { Router } from 'express'
 import { z } from 'zod'
 import { requireAuth, type AuthenticatedRequest } from '../middleware/auth'
 import { getAgentSettings, upsertUser } from '../db/client'
-import { getAuthorizedWalletAddress, isAuthorizationError } from '../lib/authz'
+import { isAuthorizationError, resolveAuthorizedWalletAddress } from '../lib/authz'
 
 export const authRouter = Router()
 
@@ -13,7 +13,11 @@ const SyncUserSchema = z.object({
 authRouter.post('/sync', requireAuth, async (req: AuthenticatedRequest, res) => {
   try {
     const body = SyncUserSchema.parse(req.body ?? {})
-    const walletAddress = getAuthorizedWalletAddress(req.walletAddress, body.walletAddress)
+    const walletAddress = resolveAuthorizedWalletAddress({
+      authWalletAddress: req.walletAddress,
+      requestedWalletAddress: body.walletAddress,
+      allowRequestedWithoutSessionWallet: true,
+    })
 
     const user = await upsertUser(req.userId!, walletAddress)
     if (!user) {

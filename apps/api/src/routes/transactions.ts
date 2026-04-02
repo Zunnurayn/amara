@@ -4,7 +4,7 @@ import { erc20Abi, getAddress, isAddress, zeroAddress } from 'viem'
 import { getAgentSettings, getUserByPrivyId, getUserByWalletAddress, logExecution, saveTransaction, updateTransactionStatus, upsertUser } from '../db/client'
 import { getPublicClient } from '@anara/chain'
 import { requireAuth, type AuthenticatedRequest } from '../middleware/auth'
-import { getAuthorizedWalletAddress, isAuthorizationError } from '../lib/authz'
+import { isAuthorizationError, resolveAuthorizedWalletAddress } from '../lib/authz'
 import { evaluateFeatureAccess } from '../lib/feature-flags'
 import { evaluateGuardrails } from '../lib/guardrails'
 import { logErrorEvent, logEvent, logWarn } from '../middleware/logger'
@@ -66,7 +66,12 @@ const ExecuteSchema = z.object({
 txRouter.post('/simulate', async (req: AuthenticatedRequest, res) => {
   try {
     const body = SimulateSchema.parse(req.body)
-    const walletAddress = getAuthorizedWalletAddress(req.walletAddress, body.walletAddress)
+    const persistedUser = req.userId ? await getUserByPrivyId(req.userId) : null
+    const walletAddress = resolveAuthorizedWalletAddress({
+      authWalletAddress: req.walletAddress,
+      persistedWalletAddress: persistedUser?.wallet_address,
+      requestedWalletAddress: body.walletAddress,
+    })
     logEvent('tx_simulation_requested', {
       userId: req.userId,
       walletAddress,
@@ -134,7 +139,12 @@ txRouter.post('/simulate', async (req: AuthenticatedRequest, res) => {
 txRouter.post('/broadcast', async (req: AuthenticatedRequest, res) => {
   try {
     const body = ExecuteSchema.parse(req.body)
-    const walletAddress = getAuthorizedWalletAddress(req.walletAddress, body.walletAddress)
+    const persistedUser = req.userId ? await getUserByPrivyId(req.userId) : null
+    const walletAddress = resolveAuthorizedWalletAddress({
+      authWalletAddress: req.walletAddress,
+      persistedWalletAddress: persistedUser?.wallet_address,
+      requestedWalletAddress: body.walletAddress,
+    })
     const featureAccess = evaluateFeatureAccess(body.actionCard.type)
     if (!featureAccess.allowed) {
       logWarn('tx_broadcast_blocked_by_feature_flag', {
@@ -195,7 +205,12 @@ txRouter.post('/broadcast', async (req: AuthenticatedRequest, res) => {
 txRouter.post('/execute', async (req: AuthenticatedRequest, res) => {
   try {
     const body = ExecuteSchema.parse(req.body)
-    const walletAddress = getAuthorizedWalletAddress(req.walletAddress, body.walletAddress)
+    const persistedUser = req.userId ? await getUserByPrivyId(req.userId) : null
+    const walletAddress = resolveAuthorizedWalletAddress({
+      authWalletAddress: req.walletAddress,
+      persistedWalletAddress: persistedUser?.wallet_address,
+      requestedWalletAddress: body.walletAddress,
+    })
     const featureAccess = evaluateFeatureAccess(body.actionCard.type)
     if (!featureAccess.allowed) {
       logWarn('tx_execute_blocked_by_feature_flag', {

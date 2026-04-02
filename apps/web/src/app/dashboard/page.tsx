@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter }   from 'next/navigation'
+import Link from 'next/link'
 import { AnaraLogo, KenteStrip, Badge, Card, StatGrid, LiveDot } from '../../components/ui'
 import { colors, shadows } from '../../lib/ui-tokens'
 import { useWalletStore, useAgentStore, useUIStore } from '../../store'
@@ -9,14 +10,15 @@ import { useAgent } from '../../hooks/useAgent'
 import { track } from '../../lib/analytics'
 import { resolveWalletIdentity } from '../../lib/wallet'
 import { useAuth } from '../../lib/auth'
-import type { WalletChainSummary, WalletNftSummary } from '@anara/types'
+import type { TokenBalance, WalletChainSummary, WalletNftSummary } from '@anara/types'
 
 export default function DashboardPage() {
-  const { ready, authenticated, user, logout } = useAuth()
+  const { ready, authenticated, syncReady, user, logout } = useAuth()
   const router  = useRouter()
   const { fetchBrief, fetchStatus, refreshWallet } = useAgent()
   const { address, totalUsd, tokens, nfts, chains, transactions, isLoading, error, hasWallet, lastUpdated, setAddress, setHasWallet } = useWalletStore()
   const { state: agentState, brief, setChatOpen } = useAgentStore()
+  const { activeSheet, closeSheet } = useUIStore()
   const [showBrief, setShowBrief]   = useState(true)
   const [activeTab, setActiveTab]   = useState<'activity' | 'assets' | 'nfts'>('activity')
   const [chainOpen, setChainOpen]   = useState(false)
@@ -27,7 +29,7 @@ export default function DashboardPage() {
   }, [ready, authenticated, router])
 
   useEffect(() => {
-    if (authenticated) {
+    if (authenticated && syncReady) {
       const { address: walletAddress, hasWallet } = resolveWalletIdentity(user)
       setHasWallet(hasWallet)
       if (walletAddress) setAddress(walletAddress)
@@ -37,7 +39,7 @@ export default function DashboardPage() {
         fetchBrief()
       }
     }
-  }, [authenticated, user, setAddress, setHasWallet, fetchBrief, fetchStatus, refreshWallet])
+  }, [authenticated, syncReady, user, setAddress, setHasWallet, fetchBrief, fetchStatus, refreshWallet])
 
   useEffect(() => {
     if (!authenticated || !hasWallet || isLoading || trackedDashboardLoad) return
@@ -70,7 +72,7 @@ export default function DashboardPage() {
 
   if (!hasWallet) return <MissingWalletState />
 
-  if (showBrief && brief) {
+  if (showBrief && brief && hasReportableBrief(brief)) {
     return <BriefModal brief={brief} onDismiss={() => setShowBrief(false)} />
   }
 
@@ -223,6 +225,20 @@ export default function DashboardPage() {
         )}
       </main>
 
+      {activeSheet && (
+        <QuickActionSheet
+          sheet={activeSheet}
+          address={address}
+          tokens={tokens}
+          onClose={closeSheet}
+          onOpenChat={(prompt) => {
+            closeSheet()
+            setChatOpen(true)
+            router.push(`/dashboard/chat?prompt=${encodeURIComponent(prompt)}&autosend=1`)
+          }}
+        />
+      )}
+
       {/* Agent FAB */}
       <button
         onClick={() => { setChatOpen(true); router.push('/dashboard/chat') }}
@@ -247,6 +263,341 @@ function LoadingSplash() {
       <div className="text-[10px] font-mono text-muted tracking-widest animate-pulse">LOADING WALLET…</div>
     </div>
   )
+}
+
+function hasReportableBrief(brief: Brief | null) {
+  if (!brief) return false
+  if ((brief.actionsCount ?? 0) > 0) return true
+  if ((brief.errorsCount ?? 0) > 0) return true
+  if (Array.isArray(brief.events) && brief.events.length > 0) return true
+  return false
+}
+
+function QuickActionSheet({
+  sheet,
+  address,
+  tokens,
+  onClose,
+  onOpenChat,
+}: {
+  sheet: 'send' | 'receive' | 'swap' | 'bridge'
+  address: string | null
+  tokens: TokenBalance[]
+  onClose: () => void
+  onOpenChat: (prompt: string) => void
+}) {
+  const [copied, setCopied] = useState(false)
+  const tokenOptions = buildTokenOptions(tokens)
+  const defaultToken = tokenOptions[0]?.symbol ?? 'ETH'
+  const [sendToken, setSendToken] = useState(defaultToken)
+  const [sendAmount, setSendAmount] = useState('')
+  const [sendAddress, setSendAddress] = useState('')
+  const [sendChain, setSendChain] = useState<'Base' | 'Ethereum'>('Base')
+  const [swapFromToken, setSwapFromToken] = useState(defaultToken)
+  const [swapToToken, setSwapToToken] = useState(tokenOptions.find((token) => token.symbol !== defaultToken)?.symbol ?? 'USDC')
+  const [swapAmount, setSwapAmount] = useState('')
+  const [swapChain, setSwapChain] = useState<'Base' | 'Ethereum'>('Base')
+  const [bridgeToken, setBridgeToken] = useState(defaultToken)
+  const [bridgeAmount, setBridgeAmount] = useState('')
+  const [bridgeFromChain, setBridgeFromChain] = useState<'Base' | 'Ethereum'>('Base')
+  const [bridgeToChain, setBridgeToChain] = useState<'Base' | 'Ethereum'>('Ethereum')
+
+  const sheetMeta = {
+    send: {
+      title: 'Send',
+      body: 'Open chat with a prefilled send request and confirm it through the existing execution flow.',
+      prompts: [
+        'Send 10 USDC to 0x1111111111111111111111111111111111111111 on Base',
+        'Send 0.001 ETH to 0x1111111111111111111111111111111111111111',
+      ],
+      accent: colors.kola,
+    },
+    receive: {
+      title: 'Receive',
+      body: 'Share your wallet address or copy it directly for inbound transfers.',
+      prompts: [],
+      accent: colors.green,
+    },
+    swap: {
+      title: 'Swap',
+      body: 'Open chat with a prefilled swap request and reuse the same preview and confirmation pipeline.',
+      prompts: [
+        'Swap 0.01 ETH to USDC on Base',
+        'Swap 25 USDC to ETH on Base',
+      ],
+      accent: colors.gold,
+    },
+    bridge: {
+      title: 'Bridge',
+      body: 'Open chat with a prefilled bridge request. This still respects beta feature flags and guardrails.',
+      prompts: [
+        'Bridge 10 USDC from Base to Ethereum',
+        'Bridge 0.005 ETH from Base to Ethereum',
+      ],
+      accent: colors.teal,
+    },
+  } as const
+
+  const meta = sheetMeta[sheet]
+
+  async function handleCopyAddress() {
+    if (!address) return
+    await navigator.clipboard.writeText(address)
+    setCopied(true)
+    window.setTimeout(() => setCopied(false), 1500)
+  }
+
+  return (
+    <div className="fixed inset-0 z-30">
+      <button
+        aria-label="Close quick action sheet"
+        className="absolute inset-0 bg-earth/70"
+        onClick={onClose}
+      />
+      <div className="absolute inset-x-0 bottom-0 mx-auto w-full max-w-md border border-border bg-soil shadow-2xl">
+        <KenteStrip height={4} />
+        <div className="flex items-start justify-between gap-4 p-4 border-b border-border">
+          <div>
+            <div className="text-[10px] font-bold tracking-[0.2em] uppercase text-muted">Quick Action</div>
+            <div className="text-xl font-display font-black mt-1" style={{ color: meta.accent }}>{meta.title}</div>
+            <div className="text-sm text-muted mt-2 leading-6">{meta.body}</div>
+          </div>
+          <button onClick={onClose} className="text-xs border border-border px-3 py-1.5 text-muted hover:text-cream hover:border-border2">
+            Close
+          </button>
+        </div>
+
+        {sheet === 'receive' ? (
+          <div className="p-4 space-y-4">
+            <div className="border border-border bg-clay p-4">
+              <div className="text-[10px] font-bold tracking-[0.2em] uppercase text-muted mb-2">Wallet Address</div>
+              <div className="font-mono text-[12px] text-text2 break-all">{address ?? 'No linked wallet address available yet.'}</div>
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={handleCopyAddress}
+                disabled={!address}
+                className="flex-1 bg-gold text-earth font-bold text-xs uppercase tracking-wide px-4 py-3 disabled:opacity-50"
+              >
+                {copied ? 'Copied' : 'Copy Address'}
+              </button>
+              {address && (
+                <Link
+                  href={`/dashboard/chat?prompt=${encodeURIComponent(`What is my wallet address?`)}`}
+                  onClick={onClose}
+                  className="flex-1 border border-border text-center text-xs font-bold uppercase tracking-wide px-4 py-3 text-text2 hover:border-border2"
+                >
+                  Open In Chat
+                </Link>
+              )}
+            </div>
+          </div>
+        ) : sheet === 'send' ? (
+          <div className="p-4 space-y-4">
+            <QuickField
+              label="Asset"
+              control={(
+                <select value={sendToken} onChange={(event) => setSendToken(event.target.value)} className={quickInputClassName}>
+                  {tokenOptions.map((token) => (
+                    <option key={`${token.symbol}-${token.chain}`} value={token.symbol}>{token.symbol} · {token.chain}</option>
+                  ))}
+                </select>
+              )}
+            />
+            <QuickField
+              label="Amount"
+              control={(
+                <input
+                  value={sendAmount}
+                  onChange={(event) => setSendAmount(event.target.value)}
+                  placeholder="10"
+                  className={quickInputClassName}
+                />
+              )}
+            />
+            <QuickField
+              label="Recipient"
+              control={(
+                <input
+                  value={sendAddress}
+                  onChange={(event) => setSendAddress(event.target.value)}
+                  placeholder="0x1111111111111111111111111111111111111111"
+                  className={`${quickInputClassName} font-mono`}
+                />
+              )}
+            />
+            <QuickField
+              label="Chain"
+              control={(
+                <select value={sendChain} onChange={(event) => setSendChain(event.target.value as 'Base' | 'Ethereum')} className={quickInputClassName}>
+                  <option>Base</option>
+                  <option>Ethereum</option>
+                </select>
+              )}
+            />
+            <button
+              onClick={() => onOpenChat(`Send ${sendAmount || '<amount>'} ${sendToken} to ${sendAddress || '<recipient>'} on ${sendChain}`)}
+              className="w-full bg-gold text-earth font-bold text-xs uppercase tracking-wide px-4 py-3"
+            >
+              Continue In Chat
+            </button>
+          </div>
+        ) : sheet === 'swap' ? (
+          <div className="p-4 space-y-4">
+            <QuickField
+              label="From Asset"
+              control={(
+                <select value={swapFromToken} onChange={(event) => setSwapFromToken(event.target.value)} className={quickInputClassName}>
+                  {tokenOptions.map((token) => (
+                    <option key={`${token.symbol}-${token.chain}`} value={token.symbol}>{token.symbol} · {token.chain}</option>
+                  ))}
+                </select>
+              )}
+            />
+            <QuickField
+              label="To Asset"
+              control={(
+                <select value={swapToToken} onChange={(event) => setSwapToToken(event.target.value)} className={quickInputClassName}>
+                  {tokenOptions.map((token) => (
+                    <option key={`${token.symbol}-${token.chain}`} value={token.symbol}>{token.symbol} · {token.chain}</option>
+                  ))}
+                </select>
+              )}
+            />
+            <QuickField
+              label="Amount"
+              control={(
+                <input
+                  value={swapAmount}
+                  onChange={(event) => setSwapAmount(event.target.value)}
+                  placeholder="0.01"
+                  className={quickInputClassName}
+                />
+              )}
+            />
+            <QuickField
+              label="Chain"
+              control={(
+                <select value={swapChain} onChange={(event) => setSwapChain(event.target.value as 'Base' | 'Ethereum')} className={quickInputClassName}>
+                  <option>Base</option>
+                  <option>Ethereum</option>
+                </select>
+              )}
+            />
+            <button
+              onClick={() => onOpenChat(`Swap ${swapAmount || '<amount>'} ${swapFromToken} to ${swapToToken} on ${swapChain}`)}
+              className="w-full bg-gold text-earth font-bold text-xs uppercase tracking-wide px-4 py-3"
+            >
+              Continue In Chat
+            </button>
+          </div>
+        ) : sheet === 'bridge' ? (
+          <div className="p-4 space-y-4">
+            <QuickField
+              label="Asset"
+              control={(
+                <select value={bridgeToken} onChange={(event) => setBridgeToken(event.target.value)} className={quickInputClassName}>
+                  {tokenOptions.map((token) => (
+                    <option key={`${token.symbol}-${token.chain}`} value={token.symbol}>{token.symbol} · {token.chain}</option>
+                  ))}
+                </select>
+              )}
+            />
+            <QuickField
+              label="Amount"
+              control={(
+                <input
+                  value={bridgeAmount}
+                  onChange={(event) => setBridgeAmount(event.target.value)}
+                  placeholder="10"
+                  className={quickInputClassName}
+                />
+              )}
+            />
+            <div className="grid grid-cols-2 gap-3">
+              <QuickField
+                label="From"
+                control={(
+                  <select value={bridgeFromChain} onChange={(event) => setBridgeFromChain(event.target.value as 'Base' | 'Ethereum')} className={quickInputClassName}>
+                    <option>Base</option>
+                    <option>Ethereum</option>
+                  </select>
+                )}
+              />
+              <QuickField
+                label="To"
+                control={(
+                  <select value={bridgeToChain} onChange={(event) => setBridgeToChain(event.target.value as 'Base' | 'Ethereum')} className={quickInputClassName}>
+                    <option>Ethereum</option>
+                    <option>Base</option>
+                  </select>
+                )}
+              />
+            </div>
+            <button
+              onClick={() => onOpenChat(`Bridge ${bridgeAmount || '<amount>'} ${bridgeToken} from ${bridgeFromChain} to ${bridgeToChain}`)}
+              className="w-full bg-gold text-earth font-bold text-xs uppercase tracking-wide px-4 py-3"
+            >
+              Continue In Chat
+            </button>
+          </div>
+        ) : (
+          <div className="p-4 space-y-3">
+            {meta.prompts.map((prompt) => (
+              <button
+                key={prompt}
+                onClick={() => onOpenChat(prompt)}
+                className="w-full text-left border border-border bg-clay px-4 py-3 hover:border-border2 transition-colors"
+              >
+                <div className="text-[10px] uppercase tracking-[0.2em] text-muted font-bold mb-1">{meta.title} Prompt</div>
+                <div className="text-sm text-text2 leading-6">{prompt}</div>
+              </button>
+            ))}
+            <div className="text-[11px] text-muted leading-5 pt-1">
+              These quick actions reuse the same chat preview, guardrails, and wallet-confirmed execution flow that is already live.
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function QuickField({ label, control }: { label: string; control: React.ReactNode }) {
+  return (
+    <label className="block">
+      <div className="text-[10px] font-bold tracking-[0.2em] uppercase text-muted mb-2">{label}</div>
+      {control}
+    </label>
+  )
+}
+
+const quickInputClassName = 'w-full border border-border bg-clay px-3 py-3 text-sm text-text2 outline-none focus:border-gold/40'
+
+function buildTokenOptions(tokens: TokenBalance[]) {
+  const seen = new Set<string>()
+  const options = tokens
+    .filter((token) => parseUsdAmount(token.balanceUsd) > 0 || parseFloat(token.balanceFormatted || '0') > 0)
+    .map((token) => ({
+      symbol: token.symbol,
+      chain: token.chainId === 1 ? 'Ethereum' : 'Base',
+    }))
+    .filter((token) => {
+      const key = `${token.symbol}:${token.chain}`
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+
+  if (!options.length) {
+    return [
+      { symbol: 'ETH', chain: 'Base' },
+      { symbol: 'USDC', chain: 'Base' },
+      { symbol: 'ETH', chain: 'Ethereum' },
+    ]
+  }
+
+  return options
 }
 
 interface Brief {

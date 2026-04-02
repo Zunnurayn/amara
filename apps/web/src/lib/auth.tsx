@@ -23,6 +23,7 @@ type LoginMethod = 'email' | 'sms' | 'wallet' | 'google'
 interface AuthContextValue {
   ready: boolean
   authenticated: boolean
+  syncReady: boolean
   user: User | null
   identityToken: string | null
   login: (options?: { loginMethods?: LoginMethod[] }) => Promise<void>
@@ -43,7 +44,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     <PrivyProvider
       appId={PRIVY_APP_ID}
       config={{
-        loginMethods: ['email', 'sms', 'google', 'wallet'],
+        loginMethods: ['email', 'sms', 'wallet'],
         appearance: {
           theme: 'dark',
           accentColor: '#D4920A',
@@ -72,11 +73,13 @@ function AuthSessionProvider({ children }: { children: React.ReactNode }) {
   const { logout } = useLogout()
   const lastSyncedRef = useRef<string | null>(null)
   const [identityToken, setIdentityToken] = useState<string | null>(null)
+  const [syncReady, setSyncReady] = useState(false)
 
   useEffect(() => {
     if (!ready) return
     if (!authenticated) {
       setIdentityToken(null)
+      setSyncReady(false)
       return
     }
 
@@ -112,6 +115,7 @@ function AuthSessionProvider({ children }: { children: React.ReactNode }) {
     if (lastSyncedRef.current === syncKey) return
 
     let cancelled = false
+    setSyncReady(false)
 
     async function syncUser() {
       try {
@@ -132,6 +136,7 @@ function AuthSessionProvider({ children }: { children: React.ReactNode }) {
 
         if (!cancelled) {
           lastSyncedRef.current = syncKey
+          setSyncReady(true)
           track('signup_completed', {
             userId: currentUser.id,
             method: getPrimaryLoginMethod(currentUser),
@@ -146,6 +151,7 @@ function AuthSessionProvider({ children }: { children: React.ReactNode }) {
       } catch (error) {
         if (!cancelled) {
           lastSyncedRef.current = null
+          setSyncReady(false)
           console.error('[auth sync]', error)
         }
       }
@@ -161,6 +167,7 @@ function AuthSessionProvider({ children }: { children: React.ReactNode }) {
   const value = useMemo<AuthContextValue>(() => ({
     ready,
     authenticated,
+    syncReady,
     user,
     identityToken,
     login: async (options) => {
@@ -170,7 +177,7 @@ function AuthSessionProvider({ children }: { children: React.ReactNode }) {
       })
     },
     logout,
-  }), [authenticated, identityToken, logout, openLogin, ready, user])
+  }), [authenticated, identityToken, logout, openLogin, ready, syncReady, user])
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }

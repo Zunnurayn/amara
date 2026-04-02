@@ -3,7 +3,7 @@ import { z } from 'zod'
 import { runAgent } from '@anara/agent'
 import { getRecentExecutions, getUserByPrivyId, getUserByWalletAddress, upsertUser } from '../db/client'
 import { requireAuth, type AuthenticatedRequest } from '../middleware/auth'
-import { getAuthorizedWalletAddress, isAuthorizationError } from '../lib/authz'
+import { isAuthorizationError, resolveAuthorizedWalletAddress } from '../lib/authz'
 import { evaluateFeatureAccess, getFeatureFlags } from '../lib/feature-flags'
 import { logErrorEvent, logEvent, logWarn } from '../middleware/logger'
 
@@ -24,7 +24,12 @@ const BriefSchema = z.object({
 agentRouter.post('/chat', requireAuth, async (req: AuthenticatedRequest, res) => {
   try {
     const body = ChatSchema.parse(req.body)
-    const walletAddress = getAuthorizedWalletAddress(req.walletAddress, body.walletAddress)
+    const persistedUser = req.userId ? await getUserByPrivyId(req.userId) : null
+    const walletAddress = resolveAuthorizedWalletAddress({
+      authWalletAddress: req.walletAddress,
+      persistedWalletAddress: persistedUser?.wallet_address,
+      requestedWalletAddress: body.walletAddress,
+    })
     logEvent('agent_chat_requested', {
       userId: req.userId,
       walletAddress,
@@ -100,14 +105,19 @@ agentRouter.post('/chat', requireAuth, async (req: AuthenticatedRequest, res) =>
 agentRouter.post('/brief', requireAuth, async (req: AuthenticatedRequest, res) => {
   try {
     const body = BriefSchema.parse(req.body)
-    const walletAddress = getAuthorizedWalletAddress(req.walletAddress, body.walletAddress)
+    const persistedUser = req.userId ? await getUserByPrivyId(req.userId) : null
+    const walletAddress = resolveAuthorizedWalletAddress({
+      authWalletAddress: req.walletAddress,
+      persistedWalletAddress: persistedUser?.wallet_address,
+      requestedWalletAddress: body.walletAddress,
+    })
     logEvent('agent_brief_requested', {
       userId: req.userId,
       walletAddress,
       since: body.since ?? null,
     })
     const user =
-      (req.userId ? await getUserByPrivyId(req.userId) : null) ??
+      persistedUser ??
       await getUserByWalletAddress(walletAddress) ??
       await upsertUser(req.userId!, walletAddress)
 

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { ActionCard, Button, TypingIndicator } from '../../../components/ui'
 import { useAgent } from '../../../hooks/useAgent'
 import { useAgentStore, useWalletStore } from '../../../store'
@@ -16,6 +16,7 @@ const SUGGESTIONS = [
 
 export default function DashboardChatPage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const { messages, isThinking, sendMessage, executeAction, cancelAction } = useAgent()
   const clearChat = useAgentStore((state) => state.clearChat)
   const featureFlags = useAgentStore((state) => state.state.featureFlags)
@@ -23,12 +24,33 @@ export default function DashboardChatPage() {
   const address = useWalletStore((state) => state.address)
   const [input, setInput] = useState('')
   const scrollRef = useRef<HTMLDivElement | null>(null)
+  const autoSentRef = useRef<string | null>(null)
 
   const canSend = useMemo(() => input.trim().length > 0 && !isThinking && hasWallet, [input, isThinking, hasWallet])
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
   }, [messages, isThinking])
+
+  useEffect(() => {
+    const prompt = searchParams.get('prompt')
+    const autoSend = searchParams.get('autosend') === '1'
+    if (prompt && !autoSend) {
+      setInput(prompt)
+    }
+  }, [searchParams])
+
+  useEffect(() => {
+    const prompt = searchParams.get('prompt')
+    const autoSend = searchParams.get('autosend') === '1'
+
+    if (!prompt || !autoSend || !hasWallet || isThinking) return
+    if (autoSentRef.current === prompt) return
+
+    autoSentRef.current = prompt
+    setInput('')
+    void sendMessage(prompt)
+  }, [searchParams, hasWallet, isThinking, sendMessage])
 
   async function handleSend() {
     const text = input.trim()
@@ -39,7 +61,7 @@ export default function DashboardChatPage() {
 
   return (
     <div className="min-h-screen bg-earth text-cream flex flex-col">
-      <header className="border-b border-border px-4 py-3 flex items-center justify-between bg-soil">
+      <header className="sticky top-0 z-20 border-b border-border px-4 py-3 flex items-center justify-between bg-soil/95 backdrop-blur">
         <div>
           <div className="text-[10px] uppercase tracking-[0.2em] text-green font-bold">Agent Chat</div>
           <div className="text-sm text-muted">Execute swaps, sends, and bridges with confirmation.</div>
@@ -53,8 +75,10 @@ export default function DashboardChatPage() {
               Clear
             </button>
           )}
-          <Link href="/dashboard" className="text-xs text-muted hover:text-cream transition-colors">Back</Link>
-          <button onClick={() => router.back()} className="text-xs border border-border px-3 py-1.5 hover:border-border2 transition-colors">
+          <button onClick={() => router.back()} className="text-xs text-muted hover:text-cream transition-colors">
+            Back
+          </button>
+          <button onClick={() => router.push('/dashboard')} className="text-xs border border-border px-3 py-1.5 hover:border-border2 transition-colors">
             Close
           </button>
         </div>

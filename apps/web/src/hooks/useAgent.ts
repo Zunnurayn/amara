@@ -85,7 +85,18 @@ export function useAgent() {
         }),
       })
 
-      if (!res.ok) throw new Error(`API error: ${res.status}`)
+      if (!res.ok) {
+        let detail = `API error: ${res.status}`
+        try {
+          const errorData = await res.json()
+          if (typeof errorData?.error === 'string') {
+            detail = errorData.error
+          }
+        } catch {
+          // Ignore parse failure and keep status-derived message.
+        }
+        throw new Error(detail)
+      }
 
       const data = await res.json()
 
@@ -111,7 +122,7 @@ export function useAgent() {
       const errMsg: AgentMessage = {
         id:        generateId(),
         role:      'assistant',
-        content:   "I'm having trouble connecting right now. Please check your connection and try again.",
+        content:   getUserFacingChatError(err),
         timestamp: Date.now(),
       }
       addMessage(errMsg)
@@ -335,6 +346,24 @@ export function useAgent() {
     executeAction,
     cancelAction,
   }
+}
+
+function getUserFacingChatError(error: unknown) {
+  const message = error instanceof Error ? error.message.toLowerCase() : ''
+
+  if (message.includes('credit balance is too low') || message.includes('plans & billing')) {
+    return 'Agent chat is temporarily unavailable because the AI provider account has no active credits. Restore Anthropic billing and try again.'
+  }
+
+  if (message.includes('authenticated wallet address is missing')) {
+    return 'Your authenticated session is ready, but wallet sync has not completed yet. Wait a moment and try again.'
+  }
+
+  if (error instanceof Error && error.message) {
+    return `Agent chat is unavailable right now: ${error.message}`
+  }
+
+  return "I'm having trouble connecting right now. Please check your connection and try again."
 }
 
 function buildHeaders(identityToken: string | null, includeJson = true) {
