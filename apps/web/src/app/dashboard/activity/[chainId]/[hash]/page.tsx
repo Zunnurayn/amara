@@ -3,9 +3,9 @@
 import Link from 'next/link'
 import { useMemo } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import { Badge, Card, KenteStrip } from '../../../../../components/ui'
+import { Badge, Card, KenteStrip, ChainLogo, TokenLogo } from '../../../../../components/ui'
 import { useWalletStore } from '../../../../../store'
-import { chainMeta, colors } from '../../../../../lib/ui-tokens'
+import { chainMeta } from '../../../../../lib/ui-tokens'
 
 export default function ActivityDetailPage() {
   const router = useRouter()
@@ -59,14 +59,23 @@ export default function ActivityDetailPage() {
         <Card kente>
           <div className="p-6">
             <div className="flex items-start justify-between gap-4">
-              <div>
+              <div className="flex items-start gap-3">
+                <TokenLogo
+                  symbol={transaction.tokenOut?.symbol ?? transaction.tokenIn?.symbol ?? (transaction.chainId === 1 ? 'ETH' : 'BASE')}
+                  name={transaction.tokenOut?.symbol ?? transaction.tokenIn?.symbol ?? 'Wallet Activity'}
+                  chainId={transaction.chainId}
+                  size={44}
+                />
+                <div>
                 <div className="text-[10px] uppercase tracking-[0.2em] text-muted font-bold mb-2">Transaction</div>
                 <div className="text-3xl font-display font-black">{formatTransactionTitle(transaction)}</div>
                 <div className="text-sm text-muted mt-1">{transaction.valueFormatted}</div>
+                </div>
               </div>
               <div className="flex flex-col items-end gap-2">
                 {chain && (
-                  <Badge variant="chain" color={chain.color}>
+                  <Badge variant="chain" color={chain.color} className="inline-flex items-center gap-1">
+                    <ChainLogo chainId={transaction.chainId} size={12} />
                     {chain.name}
                   </Badge>
                 )}

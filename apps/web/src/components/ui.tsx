@@ -1,6 +1,6 @@
 'use client'
 
-import { type ButtonHTMLAttributes, type ReactNode } from 'react'
+import { useState, type ButtonHTMLAttributes, type ReactNode } from 'react'
 import { clsx } from 'clsx'
 import { twMerge } from 'tailwind-merge'
 import type { AgentActionCard } from '@anara/types'
@@ -152,6 +152,98 @@ export function ChainBadge({ chainId, className }: { chainId: number; className?
     <Badge variant="chain" color={meta.color} className={cn('font-mono', className)}>
       {meta.shortName}
     </Badge>
+  )
+}
+
+export function ChainLogo({
+  chainId,
+  size = 20,
+  className,
+}: {
+  chainId: number
+  size?: number
+  className?: string
+}) {
+  if (chainId === 1) {
+    return (
+      <div
+        className={cn('flex items-center justify-center overflow-hidden rounded-full border border-border/40 bg-[#627EEA]/15', className)}
+        style={{ width: size, height: size }}
+      >
+        <svg width={Math.round(size * 0.72)} height={Math.round(size * 0.72)} viewBox="0 0 256 417" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <path d="M127.9 0L125.1 9.5V279.1L127.9 281.9L255.8 206.3L127.9 0Z" fill="#627EEA"/>
+          <path d="M127.9 0L0 206.3L127.9 281.9V151.1V0Z" fill="#8A92F0"/>
+          <path d="M127.9 306.1L126.3 308V414.1L127.9 416.9L255.9 230.6L127.9 306.1Z" fill="#627EEA"/>
+          <path d="M127.9 416.9V306.1L0 230.6L127.9 416.9Z" fill="#8A92F0"/>
+          <path d="M127.9 281.9L255.8 206.3L127.9 151.1V281.9Z" fill="#4457C6"/>
+          <path d="M0 206.3L127.9 281.9V151.1L0 206.3Z" fill="#627EEA"/>
+        </svg>
+      </div>
+    )
+  }
+
+  return (
+    <div
+      className={cn('flex items-center justify-center overflow-hidden rounded-[22%] border border-border/40 bg-white', className)}
+      style={{ width: size, height: size }}
+    >
+      <svg width={Math.round(size * 0.8)} height={Math.round(size * 0.8)} viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <rect width="64" height="64" rx="14" fill="#0052FF" />
+        <rect x="18" y="18" width="28" height="28" rx="7" fill="white" />
+      </svg>
+    </div>
+  )
+}
+
+export function TokenLogo({
+  symbol,
+  name,
+  logoUrl,
+  chainId,
+  size = 32,
+  className,
+}: {
+  symbol: string
+  name?: string
+  logoUrl?: string
+  chainId?: number
+  size?: number
+  className?: string
+}) {
+  const [imageFailed, setImageFailed] = useState(false)
+  const initials = (symbol || name || '?').replace(/[^A-Za-z0-9]/g, '').slice(0, 2).toUpperCase() || '?'
+  const hasImage = Boolean(logoUrl && !imageFailed)
+
+  if (hasImage) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={logoUrl}
+        alt={name ?? symbol}
+        className={cn('rounded-full border border-border/30 object-cover bg-clay', className)}
+        style={{ width: size, height: size }}
+        onError={() => setImageFailed(true)}
+      />
+    )
+  }
+
+  if (symbol.toUpperCase() === 'ETH' || symbol.toUpperCase() === 'WETH') {
+    return <ChainLogo chainId={chainId ?? 1} size={size} className={className} />
+  }
+
+  return (
+    <div
+      className={cn('flex items-center justify-center rounded-full border border-border/35 font-mono font-black', className)}
+      style={{
+        width: size,
+        height: size,
+        background: `linear-gradient(135deg, ${(chainId === 1 ? colors.chains.eth : colors.chains.base)}22 0%, ${colors.clay2} 100%)`,
+        color: chainId === 1 ? colors.chains.eth : colors.chains.base,
+        fontSize: Math.max(10, Math.round(size * 0.32)),
+      }}
+    >
+      {initials}
+    </div>
   )
 }
 

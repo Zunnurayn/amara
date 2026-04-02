@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { useRouter }   from 'next/navigation'
 import Link from 'next/link'
 import { getSwapQuote } from '@anara/chain'
-import { AnaraLogo, KenteStrip, Badge, Card, StatGrid, LiveDot, ActionCard } from '../../components/ui'
+import { AnaraLogo, KenteStrip, Badge, Card, StatGrid, LiveDot, ActionCard, ChainLogo, TokenLogo } from '../../components/ui'
 import { colors, shadows } from '../../lib/ui-tokens'
 import { useWalletStore, useAgentStore, useUIStore } from '../../store'
 import { useAgent } from '../../hooks/useAgent'
@@ -102,9 +102,10 @@ export default function DashboardPage() {
               {chains.slice(0, 3).map((chain) => (
                 <span
                   key={chain.chainId}
-                  style={{ background: chain.chainId === 1 ? colors.chains.eth : colors.chains.base }}
-                  className="inline-block w-2 h-2 rounded-full"
-                />
+                  className="inline-flex"
+                >
+                  <ChainLogo chainId={chain.chainId} size={10} />
+                </span>
               ))}
               <span className="ml-1">{Math.max(chains.length, 1)} {chains.length === 1 ? 'chain' : 'chains'} ▾</span>
             </button>
@@ -1193,12 +1194,15 @@ function PortfolioHero({
       {/* Stats row */}
       <div className="flex border-t border-border">
         {[
-          { label: 'Base',      value: formatChainTotal(chains, 8453),  color: colors.chains.base },
-          { label: 'Ethereum',  value: formatChainTotal(chains, 1),     color: colors.chains.eth  },
+          { label: 'Base',      value: formatChainTotal(chains, 8453),  color: colors.chains.base, chainId: 8453 },
+          { label: 'Ethereum',  value: formatChainTotal(chains, 1),     color: colors.chains.eth, chainId: 1 },
           { label: 'Assets',    value: String(tokenCount + nftCount),   color: colors.gold2       },
         ].map((s, i) => (
           <div key={s.label} className={`flex-1 p-3 ${i < 2 ? 'border-r border-border' : ''}`}>
-            <div className="font-display font-bold text-lg" style={{ color: s.color }}>{s.value}</div>
+            <div className="flex items-center gap-2">
+              {'chainId' in s && s.chainId ? <ChainLogo chainId={s.chainId} size={16} /> : null}
+              <div className="font-display font-bold text-lg" style={{ color: s.color }}>{s.value}</div>
+            </div>
             <div className="text-[9px] text-muted uppercase tracking-wide mt-0.5">{s.label}</div>
           </div>
         ))}
@@ -1298,10 +1302,13 @@ function ActivityTab({ transactions, isLoading, error }: { transactions: any[]; 
           }`}>{item.type === 'send' ? '↑' : item.type === 'receive' ? '↓' : '⌘'}</div>
           <div className="flex-1">
             <div className="text-[12px] text-cream">{formatActivityLabel(item)}</div>
-            <div className="text-[10px] text-muted font-mono mt-1">
+            <div className="mt-1 flex items-center gap-1.5 text-[10px] text-muted font-mono">
+              <ChainLogo chainId={item.chainId === 1 ? 1 : 8453} size={12} />
+              <span>
               {item.hash ? `${item.hash.slice(0, 10)}…${item.hash.slice(-4)}` : 'Pending hash'}
               {' · '}
               {item.chainId === 1 ? 'Ethereum' : 'Base'}
+              </span>
             </div>
             <div className="flex gap-2 mt-1 items-center">
               <div className={`w-1 h-1 rounded-full ${item.status === 'confirmed' ? 'bg-green' : 'bg-muted2'}`} />
@@ -1324,7 +1331,7 @@ function AssetsTab({ tokens }: { tokens: any[] }) {
     address: token.address,
     chainId: token.chainId,
     symbol: token.symbol,
-    icon: String(token.symbol ?? '?').slice(0, 1),
+    logoUrl: token.logoUrl,
     amount: token.balanceFormatted,
     value: token.balanceUsd,
     name: token.name,
@@ -1340,14 +1347,14 @@ function AssetsTab({ tokens }: { tokens: any[] }) {
           className="w-full flex items-center justify-between px-4 py-3 border-b border-border/50 last:border-b-0 hover:bg-clay/30 transition-colors cursor-pointer text-left"
         >
           <div className="flex items-center gap-3">
-            <div
-              className="w-8 h-8 flex items-center justify-center text-[10px] font-black font-mono border"
-              style={{ background: `${a.color}20`, borderColor: `${a.color}35`, color: a.color }}
-            >{a.icon}</div>
+            <TokenLogo symbol={a.symbol} name={a.name} logoUrl={a.logoUrl} chainId={a.chainId} size={32} />
             <div>
               <div className="text-[13px] font-bold">{a.symbol}</div>
               <div className="text-[10px] text-muted">{a.name}</div>
-              <span className="text-[8px] text-muted bg-clay border border-border px-1.5 py-0.5 font-mono">{a.chain}</span>
+              <span className="mt-1 inline-flex items-center gap-1 text-[8px] text-muted bg-clay border border-border px-1.5 py-0.5 font-mono">
+                <ChainLogo chainId={a.chainId} size={10} />
+                {a.chain}
+              </span>
             </div>
           </div>
           <div className="text-right">
@@ -1472,7 +1479,7 @@ function ChainMenu() {
       <div className="text-[9px] font-bold tracking-[0.16em] text-muted uppercase px-3 py-2.5 border-b border-border">Connected Networks</div>
       {chains.map(c => (
         <div key={c.name} className="flex items-center gap-3 px-3 py-2.5 border-b border-border/50 last:border-b-0 hover:bg-clay transition-colors cursor-pointer">
-          <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: c.color }} />
+          <ChainLogo chainId={c.name === 'Ethereum' ? 1 : 8453} size={16} />
           <div className="flex-1">
             <div className="text-[12px] font-bold">{c.name}</div>
             <div className="text-[9px] text-muted">{c.sub}</div>
