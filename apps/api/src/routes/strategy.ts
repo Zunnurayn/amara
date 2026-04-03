@@ -9,6 +9,7 @@ import {
 } from '../db/client'
 import { requireAuth, type AuthenticatedRequest } from '../middleware/auth'
 import { buildRebalancePreview, buildRebalanceStrategyView } from '../services/strategy-rebalance'
+import { buildYieldPreview, buildYieldStrategyView } from '../services/strategy-yield'
 
 export const strategyRouter = Router()
 
@@ -72,6 +73,9 @@ strategyRouter.get('/', async (req: AuthenticatedRequest, res) => {
     const rebalanceView = user.wallet_address
       ? await buildRebalanceStrategyView(user.wallet_address)
       : null
+    const yieldView = user.wallet_address
+      ? await buildYieldStrategyView(user.wallet_address)
+      : null
 
     res.json({
       strategies: strategyCatalog.map((strategy) => ({
@@ -81,8 +85,14 @@ strategyRouter.get('/', async (req: AuthenticatedRequest, res) => {
           ? 'paused'
           : strategy.id === 'rebalance' && rebalanceView
             ? rebalanceView.status
+            : strategy.id === 'yield' && yieldView
+              ? yieldView.status
             : strategy.defaultStatus,
-        pnl: strategy.id === 'rebalance' && rebalanceView ? rebalanceView.pnl : strategy.pnl,
+        pnl: strategy.id === 'rebalance' && rebalanceView
+          ? rebalanceView.pnl
+          : strategy.id === 'yield' && yieldView
+            ? yieldView.pnl
+            : strategy.pnl,
         type: strategy.type,
       })),
       settings: serializeSettings(settings),
@@ -109,18 +119,21 @@ strategyRouter.get('/:id', async (req: AuthenticatedRequest, res) => {
     const rebalanceView = strategy.id === 'rebalance' && user.wallet_address
       ? await buildRebalanceStrategyView(user.wallet_address)
       : null
+    const yieldView = strategy.id === 'yield' && user.wallet_address
+      ? await buildYieldStrategyView(user.wallet_address)
+      : null
     const status = settings[strategyFieldMap[strategy.id]] === false
       ? 'paused'
-      : rebalanceView?.status ?? strategy.defaultStatus
+      : rebalanceView?.status ?? yieldView?.status ?? strategy.defaultStatus
 
     res.json({
       id: strategy.id,
       name: strategy.name,
       status,
       type: strategy.type,
-      pnl: rebalanceView?.pnl ?? strategy.pnl,
+      pnl: rebalanceView?.pnl ?? yieldView?.pnl ?? strategy.pnl,
       settings: serializeSettings(settings),
-      details: rebalanceView?.details ?? strategyDetailCopy[strategy.id] ?? {},
+      details: rebalanceView?.details ?? yieldView?.details ?? strategyDetailCopy[strategy.id] ?? {},
     })
   } catch (err) {
     console.error('[strategy detail]', err)
@@ -181,16 +194,18 @@ strategyRouter.post('/settings', async (req: AuthenticatedRequest, res) => {
 strategyRouter.post('/:id/preview', async (req: AuthenticatedRequest, res) => {
   try {
     const strategyId = normalizeStrategyId(req.params.id)
-    if (strategyId !== 'rebalance') {
-      return res.status(400).json({ error: 'Preview generation is only implemented for rebalance right now.' })
+    if (strategyId !== 'rebalance' && strategyId !== 'yield') {
+      return res.status(400).json({ error: 'Preview generation is only implemented for rebalance and yield right now.' })
     }
 
     const user = await getOrCreateAuthenticatedUser(req)
     if (!user.wallet_address) {
-      return res.status(400).json({ error: 'A linked wallet is required before generating a rebalance preview.' })
+      return res.status(400).json({ error: 'A linked wallet is required before generating a strategy preview.' })
     }
 
-    const preview = await buildRebalancePreview(user.wallet_address)
+    const preview = strategyId === 'rebalance'
+      ? await buildRebalancePreview(user.wallet_address)
+      : await buildYieldPreview(user.wallet_address)
     return res.json(preview)
   } catch (err) {
     console.error('[strategy preview]', err)

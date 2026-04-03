@@ -6,7 +6,7 @@ import Link from 'next/link'
 import { getSwapQuote } from '@anara/chain'
 import { AnaraLogo, KenteStrip, Badge, Card, StatGrid, LiveDot, ActionCard, ChainLogo, TokenLogo } from '../../components/ui'
 import { colors, shadows } from '../../lib/ui-tokens'
-import { useWalletStore, useAgentStore, useUIStore } from '../../store'
+import { useWalletStore, useAgentStore } from '../../store'
 import { useAgent } from '../../hooks/useAgent'
 import { track } from '../../lib/analytics'
 import { resolveWalletIdentity } from '../../lib/wallet'
@@ -16,10 +16,9 @@ import type { AgentActionCard, TokenBalance, WalletChainSummary, WalletNftSummar
 export default function DashboardPage() {
   const { ready, authenticated, syncReady, user, logout } = useAuth()
   const router  = useRouter()
-  const { fetchBrief, fetchStatus, refreshWallet, executeStandaloneAction } = useAgent()
+  const { fetchBrief, fetchStatus, refreshWallet } = useAgent()
   const { address, totalUsd, tokens, nfts, chains, transactions, isLoading, error, hasWallet, lastUpdated, setAddress, setHasWallet } = useWalletStore()
   const { state: agentState, brief, setChatOpen } = useAgentStore()
-  const { activeSheet, closeSheet } = useUIStore()
   const [showBrief, setShowBrief]   = useState(true)
   const [activeTab, setActiveTab]   = useState<'activity' | 'assets' | 'nfts'>('assets')
   const [chainOpen, setChainOpen]   = useState(false)
@@ -226,23 +225,6 @@ export default function DashboardPage() {
           </div>
         )}
       </main>
-
-      {activeSheet && (
-        <QuickActionSheet
-          sheet={activeSheet}
-          address={address}
-          tokens={tokens}
-          hasWallet={hasWallet}
-          onClose={closeSheet}
-          onExecuteDirectAction={executeStandaloneAction}
-          onOpenChat={(prompt) => {
-            closeSheet()
-            setChatOpen(true)
-            router.push(`/dashboard/chat?prompt=${encodeURIComponent(prompt)}&autosend=1`)
-          }}
-        />
-      )}
-
       {/* Agent FAB */}
       <button
         onClick={() => { setChatOpen(true); router.push('/dashboard/chat') }}
@@ -1171,7 +1153,8 @@ function PortfolioHero({
   tokenCount: number
   nftCount: number
 }) {
-  const { openSheet } = useUIStore()
+  const router = useRouter()
+  const setChatOpen = useAgentStore((state) => state.setChatOpen)
   const chainBreakdown = chains.filter((chain) => parseUsdAmount(chain.totalUsd) > 0)
   const totalValue = Math.max(parseUsdAmount(totalUsd), 0.01)
   return (
@@ -1218,7 +1201,10 @@ function PortfolioHero({
         ].map(a => (
           <button
             key={a.label}
-            onClick={() => openSheet(a.sheet)}
+            onClick={() => {
+              setChatOpen(true)
+              router.push(`/dashboard/chat?action=${a.sheet}`)
+            }}
             className="flex-1 flex flex-col items-center gap-1 py-2.5 bg-clay2 border border-border hover:border-border2 transition-colors"
             style={{ borderTopWidth: 2, borderTopColor: a.color }}
           >

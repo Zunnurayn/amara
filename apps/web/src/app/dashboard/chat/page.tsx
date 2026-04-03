@@ -3,9 +3,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
+import { getSwapQuote } from '@anara/chain'
 import { ActionCard, Button, TypingIndicator } from '../../../components/ui'
 import { useAgent } from '../../../hooks/useAgent'
 import { useAgentStore, useWalletStore } from '../../../store'
+import type { AgentActionCard, TokenBalance } from '@anara/types'
 
 const SUGGESTIONS = [
   'Swap 0.1 ETH to USDC',
@@ -17,14 +19,16 @@ const SUGGESTIONS = [
 export default function DashboardChatPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const { messages, isThinking, sendMessage, executeAction, cancelAction } = useAgent()
+  const { messages, isThinking, sendMessage, executeAction, executeStandaloneAction, cancelAction } = useAgent()
   const clearChat = useAgentStore((state) => state.clearChat)
   const featureFlags = useAgentStore((state) => state.state.featureFlags)
   const hasWallet = useWalletStore((state) => state.hasWallet)
   const address = useWalletStore((state) => state.address)
+  const tokens = useWalletStore((state) => state.tokens)
   const [input, setInput] = useState('')
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const autoSentRef = useRef<string | null>(null)
+  const action = searchParams.get('action') as 'send' | 'receive' | 'swap' | 'bridge' | null
 
   const canSend = useMemo(() => input.trim().length > 0 && !isThinking && hasWallet, [input, isThinking, hasWallet])
 
@@ -127,6 +131,22 @@ export default function DashboardChatPage() {
         )}
 
         <div ref={scrollRef} className="flex flex-col gap-3 overflow-y-auto pr-1">
+          {action && (
+            <div className="mr-auto max-w-xl">
+              <ChatQuickActionPanel
+                action={action}
+                address={address}
+                tokens={tokens}
+                hasWallet={hasWallet}
+                onExecuteDirectAction={executeStandaloneAction}
+                onClose={() => router.push('/dashboard/chat')}
+              />
+              <div className="mt-1 text-[10px] font-mono text-muted text-left">
+                {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              </div>
+            </div>
+          )}
+
           {messages.map((message) => (
             <div key={message.id} className={message.role === 'user' ? 'ml-auto max-w-xl' : 'mr-auto max-w-xl'}>
               {message.actionCard && (
@@ -228,4 +248,627 @@ function parseExecutionSummary(content: string) {
     tx: lines.find((line) => line.startsWith('Tx: '))?.replace('Tx: ', '') ?? null,
     explorerUrl: lines.find((line) => line.startsWith('Explorer: '))?.replace('Explorer: ', '') ?? null,
   }
+}
+
+function ChatQuickActionPanel({
+  action,
+  address,
+  tokens,
+  hasWallet,
+  onExecuteDirectAction,
+  onClose,
+}: {
+  action: 'send' | 'receive' | 'swap' | 'bridge'
+  address: string | null
+  tokens: TokenBalance[]
+  hasWallet: boolean
+  onExecuteDirectAction: (card: AgentActionCard, onCardChange?: (nextCard: AgentActionCard) => void) => Promise<unknown>
+  onClose: () => void
+}) {
+  const [copied, setCopied] = useState(false)
+  const tokenOptions = buildTokenOptions(tokens)
+  const defaultToken = tokenOptions[0]?.symbol ?? 'ETH'
+  const [sendToken, setSendToken] = useState(defaultToken)
+  const [sendAmount, setSendAmount] = useState('')
+  const [sendAddress, setSendAddress] = useState('')
+  const [sendChain, setSendChain] = useState<'Base' | 'Ethereum'>('Base')
+  const [sendPreviewCard, setSendPreviewCard] = useState<AgentActionCard | null>(null)
+  const [sendPreviewError, setSendPreviewError] = useState<string | null>(null)
+  const [swapFromToken, setSwapFromToken] = useState(defaultToken)
+  const [swapToToken, setSwapToToken] = useState(tokenOptions.find((token) => token.symbol !== defaultToken)?.symbol ?? 'USDC')
+  const [swapAmount, setSwapAmount] = useState('')
+  const [swapChain, setSwapChain] = useState<'Base' | 'Ethereum'>('Base')
+  const [swapPreviewCard, setSwapPreviewCard] = useState<AgentActionCard | null>(null)
+  const [swapPreviewError, setSwapPreviewError] = useState<string | null>(null)
+  const [isSwapPreviewLoading, setIsSwapPreviewLoading] = useState(false)
+  const [bridgeToken, setBridgeToken] = useState(defaultToken)
+  const [bridgeAmount, setBridgeAmount] = useState('')
+  const [bridgeFromChain, setBridgeFromChain] = useState<'Base' | 'Ethereum'>('Base')
+  const [bridgeToChain, setBridgeToChain] = useState<'Base' | 'Ethereum'>('Ethereum')
+  const [bridgePreviewCard, setBridgePreviewCard] = useState<AgentActionCard | null>(null)
+  const [bridgePreviewError, setBridgePreviewError] = useState<string | null>(null)
+  const [isBridgePreviewLoading, setIsBridgePreviewLoading] = useState(false)
+
+  async function handleCopyAddress() {
+    if (!address) return
+    await navigator.clipboard.writeText(address)
+    setCopied(true)
+    window.setTimeout(() => setCopied(false), 1500)
+  }
+
+  function handlePreviewSend() {
+    const preview = buildDirectSendPreviewCard({
+      tokens,
+      symbol: sendToken,
+      amount: sendAmount,
+      toAddress: sendAddress,
+      chainName: sendChain,
+    })
+
+    if (preview instanceof Error) {
+      setSendPreviewError(preview.message)
+      setSendPreviewCard(null)
+      return
+    }
+
+    setSendPreviewError(null)
+    setSendPreviewCard(preview)
+  }
+
+  async function handlePreviewSwap() {
+    setIsSwapPreviewLoading(true)
+    try {
+      const preview = await buildDirectSwapPreviewCard({
+        tokens,
+        symbolIn: swapFromToken,
+        symbolOut: swapToToken,
+        amount: swapAmount,
+        chainName: swapChain,
+        fromAddress: address,
+      })
+
+      if (preview instanceof Error) {
+        setSwapPreviewError(preview.message)
+        setSwapPreviewCard(null)
+        return
+      }
+
+      setSwapPreviewError(null)
+      setSwapPreviewCard(preview)
+    } finally {
+      setIsSwapPreviewLoading(false)
+    }
+  }
+
+  async function handlePreviewBridge() {
+    setIsBridgePreviewLoading(true)
+    try {
+      const preview = await buildDirectBridgePreviewCard({
+        tokens,
+        symbol: bridgeToken,
+        amount: bridgeAmount,
+        fromChainName: bridgeFromChain,
+        toChainName: bridgeToChain,
+        fromAddress: address,
+      })
+
+      if (preview instanceof Error) {
+        setBridgePreviewError(preview.message)
+        setBridgePreviewCard(null)
+        return
+      }
+
+      setBridgePreviewError(null)
+      setBridgePreviewCard(preview)
+    } finally {
+      setIsBridgePreviewLoading(false)
+    }
+  }
+
+  return (
+    <div className="bg-soil border border-border px-4 py-4 text-sm leading-6">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <div className="text-sm text-text2">
+            {action === 'receive'
+              ? 'Here is your receive flow. You can copy your wallet address directly from chat.'
+              : `I opened the ${action} flow here in chat. Fill the form below to generate a preview.`}
+          </div>
+          <div className="mt-2 text-[10px] uppercase tracking-[0.2em] text-muted font-bold capitalize">
+            {action} Form
+          </div>
+        </div>
+        <button onClick={onClose} className="text-xs border border-border px-3 py-1.5 hover:border-border2 transition-colors flex-shrink-0">
+          Close
+        </button>
+      </div>
+
+      {action === 'receive' ? (
+        <div className="mt-4 space-y-4">
+          <div className="border border-border bg-clay p-4">
+            <div className="text-[10px] font-bold tracking-[0.2em] uppercase text-muted mb-2">Wallet Address</div>
+            <div className="font-mono text-[12px] text-text2 break-all">{address ?? 'No linked wallet address available yet.'}</div>
+          </div>
+          <button
+            onClick={handleCopyAddress}
+            disabled={!address}
+            className="w-full bg-gold text-earth font-bold text-xs uppercase tracking-wide px-4 py-3 disabled:opacity-50"
+          >
+            {copied ? 'Copied' : 'Copy Address'}
+          </button>
+        </div>
+      ) : action === 'send' ? (
+        <div className="mt-4 space-y-4">
+          <QuickField
+            label="Asset"
+            control={(
+              <select value={sendToken} onChange={(event) => setSendToken(event.target.value)} className={quickInputClassName}>
+                {tokenOptions.map((token) => (
+                  <option key={`${token.symbol}-${token.chain}`} value={token.symbol}>{token.symbol} · {token.chain}</option>
+                ))}
+              </select>
+            )}
+          />
+          <QuickField
+            label="Amount"
+            control={<input value={sendAmount} onChange={(event) => setSendAmount(event.target.value)} placeholder="10" className={quickInputClassName} />}
+          />
+          <QuickField
+            label="Recipient"
+            control={<input value={sendAddress} onChange={(event) => setSendAddress(event.target.value)} placeholder="0x1111111111111111111111111111111111111111" className={`${quickInputClassName} font-mono`} />}
+          />
+          <QuickField
+            label="Chain"
+            control={(
+              <select value={sendChain} onChange={(event) => setSendChain(event.target.value as 'Base' | 'Ethereum')} className={quickInputClassName}>
+                <option>Base</option>
+                <option>Ethereum</option>
+              </select>
+            )}
+          />
+          <button onClick={handlePreviewSend} className="w-full bg-gold text-earth font-bold text-xs uppercase tracking-wide px-4 py-3">Preview Send</button>
+          {sendPreviewError && <div className="border border-kola/30 bg-kola/10 px-4 py-3 text-xs text-text2">{sendPreviewError}</div>}
+          {sendPreviewCard && (
+            <PreviewModal
+              card={sendPreviewCard}
+              disabled={!hasWallet}
+              onConfirm={() => { void onExecuteDirectAction(sendPreviewCard, setSendPreviewCard) }}
+              onCancel={() => setSendPreviewCard({ ...sendPreviewCard, status: 'cancelled' })}
+              onClose={() => setSendPreviewCard(null)}
+            />
+          )}
+        </div>
+      ) : action === 'swap' ? (
+        <div className="mt-4 space-y-4">
+          <QuickField
+            label="From Asset"
+            control={(
+              <select value={swapFromToken} onChange={(event) => setSwapFromToken(event.target.value)} className={quickInputClassName}>
+                {tokenOptions.map((token) => (
+                  <option key={`${token.symbol}-${token.chain}`} value={token.symbol}>{token.symbol} · {token.chain}</option>
+                ))}
+              </select>
+            )}
+          />
+          <QuickField
+            label="To Asset"
+            control={(
+              <select value={swapToToken} onChange={(event) => setSwapToToken(event.target.value)} className={quickInputClassName}>
+                {tokenOptions.map((token) => (
+                  <option key={`${token.symbol}-${token.chain}`} value={token.symbol}>{token.symbol} · {token.chain}</option>
+                ))}
+              </select>
+            )}
+          />
+          <QuickField label="Amount" control={<input value={swapAmount} onChange={(event) => setSwapAmount(event.target.value)} placeholder="0.01" className={quickInputClassName} />} />
+          <QuickField
+            label="Chain"
+            control={(
+              <select value={swapChain} onChange={(event) => setSwapChain(event.target.value as 'Base' | 'Ethereum')} className={quickInputClassName}>
+                <option>Base</option>
+                <option>Ethereum</option>
+              </select>
+            )}
+          />
+          <button onClick={() => { void handlePreviewSwap() }} disabled={isSwapPreviewLoading} className="w-full bg-gold text-earth font-bold text-xs uppercase tracking-wide px-4 py-3 disabled:opacity-60">
+            {isSwapPreviewLoading ? 'Loading Preview…' : 'Preview Swap'}
+          </button>
+          {swapPreviewError && <div className="border border-kola/30 bg-kola/10 px-4 py-3 text-xs text-text2">{swapPreviewError}</div>}
+          {swapPreviewCard && (
+            <PreviewModal
+              card={swapPreviewCard}
+              disabled={!hasWallet}
+              onConfirm={() => { void onExecuteDirectAction(swapPreviewCard, setSwapPreviewCard) }}
+              onCancel={() => setSwapPreviewCard({ ...swapPreviewCard, status: 'cancelled' })}
+              onClose={() => setSwapPreviewCard(null)}
+            />
+          )}
+        </div>
+      ) : (
+        <div className="mt-4 space-y-4">
+          <QuickField
+            label="Asset"
+            control={(
+              <select value={bridgeToken} onChange={(event) => setBridgeToken(event.target.value)} className={quickInputClassName}>
+                {tokenOptions.map((token) => (
+                  <option key={`${token.symbol}-${token.chain}`} value={token.symbol}>{token.symbol} · {token.chain}</option>
+                ))}
+              </select>
+            )}
+          />
+          <QuickField label="Amount" control={<input value={bridgeAmount} onChange={(event) => setBridgeAmount(event.target.value)} placeholder="10" className={quickInputClassName} />} />
+          <div className="grid grid-cols-2 gap-3">
+            <QuickField
+              label="From"
+              control={(
+                <select value={bridgeFromChain} onChange={(event) => setBridgeFromChain(event.target.value as 'Base' | 'Ethereum')} className={quickInputClassName}>
+                  <option>Base</option>
+                  <option>Ethereum</option>
+                </select>
+              )}
+            />
+            <QuickField
+              label="To"
+              control={(
+                <select value={bridgeToChain} onChange={(event) => setBridgeToChain(event.target.value as 'Base' | 'Ethereum')} className={quickInputClassName}>
+                  <option>Ethereum</option>
+                  <option>Base</option>
+                </select>
+              )}
+            />
+          </div>
+          <button onClick={() => { void handlePreviewBridge() }} disabled={isBridgePreviewLoading} className="w-full bg-gold text-earth font-bold text-xs uppercase tracking-wide px-4 py-3 disabled:opacity-60">
+            {isBridgePreviewLoading ? 'Loading Preview…' : 'Preview Bridge'}
+          </button>
+          {bridgePreviewError && <div className="border border-kola/30 bg-kola/10 px-4 py-3 text-xs text-text2">{bridgePreviewError}</div>}
+          {bridgePreviewCard && (
+            <PreviewModal
+              card={bridgePreviewCard}
+              disabled={!hasWallet}
+              onConfirm={() => { void onExecuteDirectAction(bridgePreviewCard, setBridgePreviewCard) }}
+              onCancel={() => setBridgePreviewCard({ ...bridgePreviewCard, status: 'cancelled' })}
+              onClose={() => setBridgePreviewCard(null)}
+            />
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function PreviewModal({
+  card,
+  disabled,
+  onConfirm,
+  onCancel,
+  onClose,
+}: {
+  card: AgentActionCard
+  disabled: boolean
+  onConfirm: () => void
+  onCancel: () => void
+  onClose: () => void
+}) {
+  const terminalState =
+    card.status === 'confirmed' ||
+    card.status === 'failed' ||
+    card.status === 'cancelled'
+
+  return (
+    <div className="fixed inset-0 z-30">
+      <button
+        aria-label="Close preview"
+        className="absolute inset-0 bg-earth/75"
+        onClick={terminalState ? onClose : undefined}
+      />
+      <div className="absolute inset-x-0 bottom-0 mx-auto w-full max-w-md border border-border bg-soil shadow-2xl">
+        <div className="flex items-center justify-between border-b border-border px-4 py-3">
+          <div>
+            <div className="text-[10px] font-bold tracking-[0.2em] uppercase text-muted">Action Preview</div>
+            <div className="text-sm text-text2 mt-1">Review the route and confirm when ready.</div>
+          </div>
+          <button
+            onClick={onClose}
+            disabled={!terminalState && card.status !== 'pending'}
+            className="text-xs border border-border px-3 py-1.5 hover:border-border2 transition-colors disabled:opacity-40"
+          >
+            Close
+          </button>
+        </div>
+        <div className="p-4">
+          <ActionCard
+            card={card}
+            disabled={disabled}
+            onConfirm={onConfirm}
+            onCancel={onCancel}
+          />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function QuickField({ label, control }: { label: string; control: React.ReactNode }) {
+  return (
+    <label className="block">
+      <div className="text-[10px] font-bold tracking-[0.2em] uppercase text-muted mb-2">{label}</div>
+      {control}
+    </label>
+  )
+}
+
+const quickInputClassName = 'w-full border border-border bg-clay px-3 py-3 text-sm text-text2 outline-none focus:border-gold/40'
+
+function buildTokenOptions(tokens: TokenBalance[]) {
+  const seen = new Set<string>()
+  const options = tokens
+    .filter((token) => parseUsdAmount(token.balanceUsd) > 0 || parseFloat(token.balanceFormatted || '0') > 0)
+    .map((token) => ({
+      symbol: token.symbol,
+      chain: token.chainId === 1 ? 'Ethereum' : 'Base',
+    }))
+    .filter((token) => {
+      const key = `${token.symbol}:${token.chain}`
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+
+  if (!options.length) {
+    return [
+      { symbol: 'ETH', chain: 'Base' },
+      { symbol: 'USDC', chain: 'Base' },
+      { symbol: 'ETH', chain: 'Ethereum' },
+    ]
+  }
+
+  return options
+}
+
+function parseUsdAmount(value?: string) {
+  if (!value) return 0
+  return Number.parseFloat(value.replace(/[$,]/g, '')) || 0
+}
+
+function buildDirectSendPreviewCard(input: {
+  tokens: TokenBalance[]
+  symbol: string
+  amount: string
+  toAddress: string
+  chainName: 'Base' | 'Ethereum'
+}) {
+  const amount = input.amount.trim()
+  const toAddress = input.toAddress.trim()
+  if (!amount || Number.parseFloat(amount) <= 0) return new Error('Enter a valid amount before previewing the send.')
+  if (!toAddress || !/^0x[a-fA-F0-9]{40}$/.test(toAddress)) return new Error('Enter a valid recipient address before previewing the send.')
+  const chainId = input.chainName === 'Ethereum' ? 1 : 8453
+  const token = input.tokens.find((entry) => entry.symbol === input.symbol && entry.chainId === chainId)
+  if (!token) return new Error(`No ${input.symbol} balance is available on ${input.chainName}.`)
+  const priceUsd = parseUsdAmount(token.priceUsd)
+  const estimatedUsd = priceUsd > 0 ? `$${(priceUsd * Number.parseFloat(amount)).toFixed(2)}` : '$0.00'
+  const shortAddress = `${toAddress.slice(0, 10)}…${toAddress.slice(-6)}`
+  return {
+    type: 'send',
+    title: 'Send Preview',
+    status: 'pending',
+    rows: [
+      { label: 'Asset', value: token.symbol },
+      { label: 'Amount', value: `${amount} ${token.symbol}`, highlight: true },
+      { label: 'USD', value: `~${estimatedUsd}` },
+      { label: 'To', value: shortAddress },
+      { label: 'Network', value: input.chainName },
+      { label: 'Est. gas', value: '~$0.04' },
+    ],
+    metadata: {
+      kind: 'send',
+      fromChainId: chainId,
+      fromTokenSymbol: token.symbol,
+      fromTokenAddress: token.address === 'native' ? '0x0000000000000000000000000000000000000000' : token.address,
+      fromTokenDecimals: token.decimals,
+      fromAmount: amount,
+      toAddress,
+      estimatedGasUsd: 0.04,
+    },
+  } satisfies AgentActionCard
+}
+
+async function buildDirectSwapPreviewCard(input: {
+  tokens: TokenBalance[]
+  symbolIn: string
+  symbolOut: string
+  amount: string
+  chainName: 'Base' | 'Ethereum'
+  fromAddress: string | null
+}) {
+  const amount = input.amount.trim()
+  if (!input.fromAddress) return new Error('A linked wallet is required before previewing a swap.')
+  if (!amount || Number.parseFloat(amount) <= 0) return new Error('Enter a valid amount before previewing the swap.')
+  if (input.symbolIn === input.symbolOut) return new Error('Choose different assets for the swap preview.')
+  const chainId = input.chainName === 'Ethereum' ? 1 : 8453
+  const fromToken = resolveSwapTokenConfig(input.tokens, input.symbolIn, chainId)
+  if (!fromToken) return new Error(`${input.symbolIn} is not available on ${input.chainName} for this wallet.`)
+  const toToken = resolveSwapTokenConfig(input.tokens, input.symbolOut, chainId)
+  if (!toToken) return new Error(`${input.symbolOut} is not supported on ${input.chainName} yet.`)
+  try {
+    const quote = await getSwapQuote({
+      fromChainId: chainId,
+      toChainId: chainId,
+      fromTokenAddress: fromToken.address,
+      toTokenAddress: toToken.address,
+      fromAmount: toRawAmount(amount, fromToken.decimals),
+      fromAddress: input.fromAddress,
+      slippage: 0.005,
+    })
+    const fromAmount = formatTokenAmount(quote.action.fromAmount, quote.action.fromToken.decimals)
+    const toAmount = formatTokenAmount(quote.estimate?.toAmount, quote.action.toToken.decimals)
+    const minReceived = formatTokenAmount(quote.estimate?.toAmountMin, quote.action.toToken.decimals)
+    const gasUsd = formatUsdValue(quote.estimate?.gasCosts?.reduce((sum, gas) => sum + Number(gas.amountUSD ?? 0), 0) ?? null)
+    const feeUsd = formatUsdValue(quote.estimate?.feeCosts?.reduce((sum, fee) => sum + Number(fee.amountUSD ?? 0), 0) ?? null)
+    const rate = computeSwapRate(fromAmount, toAmount)
+    const route = quote.toolDetails?.name ? `${quote.toolDetails.name} · ${input.chainName}` : input.chainName
+    return {
+      type: 'swap',
+      title: 'Swap Preview',
+      status: 'pending',
+      rows: [
+        { label: 'You send', value: `${fromAmount} ${quote.action.fromToken.symbol}` },
+        { label: 'You receive', value: `~${toAmount} ${quote.action.toToken.symbol}`, highlight: true },
+        { label: 'Rate', value: rate ? `1 ${quote.action.fromToken.symbol} = ${rate} ${quote.action.toToken.symbol}` : 'Unavailable' },
+        { label: 'Min received', value: `${minReceived} ${quote.action.toToken.symbol}` },
+        { label: 'Route', value: route },
+        { label: 'Bridge fee', value: feeUsd },
+        { label: 'Est. gas', value: gasUsd },
+      ],
+      metadata: {
+        kind: 'swap',
+        routeId: quote.id,
+        tool: quote.toolDetails?.name,
+        fromChainId: chainId,
+        toChainId: chainId,
+        fromTokenSymbol: quote.action.fromToken.symbol,
+        toTokenSymbol: quote.action.toToken.symbol,
+        fromTokenAddress: fromToken.address,
+        toTokenAddress: toToken.address,
+        fromTokenDecimals: quote.action.fromToken.decimals,
+        toTokenDecimals: quote.action.toToken.decimals,
+        fromAmount: quote.action.fromAmount,
+        toAmount: quote.estimate?.toAmount,
+        toAmountMin: quote.estimate?.toAmountMin,
+        estimatedGasUsd: quote.estimate?.gasCosts?.reduce((sum, gas) => sum + Number(gas.amountUSD ?? 0), 0) ?? undefined,
+        estimatedFeeUsd: quote.estimate?.feeCosts?.reduce((sum, fee) => sum + Number(fee.amountUSD ?? 0), 0) ?? undefined,
+        steps: quote.includedSteps?.length,
+      },
+    } satisfies AgentActionCard
+  } catch (error) {
+    return new Error(error instanceof Error ? error.message : 'Swap quote failed.')
+  }
+}
+
+async function buildDirectBridgePreviewCard(input: {
+  tokens: TokenBalance[]
+  symbol: string
+  amount: string
+  fromChainName: 'Base' | 'Ethereum'
+  toChainName: 'Base' | 'Ethereum'
+  fromAddress: string | null
+}) {
+  const amount = input.amount.trim()
+  if (!input.fromAddress) return new Error('A linked wallet is required before previewing a bridge.')
+  if (!amount || Number.parseFloat(amount) <= 0) return new Error('Enter a valid amount before previewing the bridge.')
+  if (input.fromChainName === input.toChainName) return new Error('Choose different source and destination chains for the bridge preview.')
+  const fromChainId = input.fromChainName === 'Ethereum' ? 1 : 8453
+  const toChainId = input.toChainName === 'Ethereum' ? 1 : 8453
+  const fromToken = resolveSwapTokenConfig(input.tokens, input.symbol, fromChainId)
+  const toToken = resolveSwapTokenConfig(input.tokens, input.symbol, toChainId)
+  if (!fromToken) return new Error(`${input.symbol} is not available on ${input.fromChainName} for this wallet.`)
+  if (!toToken) return new Error(`${input.symbol} is not supported on ${input.toChainName} yet.`)
+  try {
+    const quote = await getSwapQuote({
+      fromChainId,
+      toChainId,
+      fromTokenAddress: fromToken.address,
+      toTokenAddress: toToken.address,
+      fromAmount: toRawAmount(amount, fromToken.decimals),
+      fromAddress: input.fromAddress,
+      slippage: 0.005,
+    })
+    const fromAmount = formatTokenAmount(quote.action.fromAmount, quote.action.fromToken.decimals)
+    const toAmount = formatTokenAmount(quote.estimate?.toAmount, quote.action.toToken.decimals)
+    const minReceived = formatTokenAmount(quote.estimate?.toAmountMin, quote.action.toToken.decimals)
+    const gasUsd = formatUsdValue(quote.estimate?.gasCosts?.reduce((sum, gas) => sum + Number(gas.amountUSD ?? 0), 0) ?? null)
+    const feeUsd = formatUsdValue(quote.estimate?.feeCosts?.reduce((sum, fee) => sum + Number(fee.amountUSD ?? 0), 0) ?? null)
+    const protocol = quote.toolDetails?.name ?? 'Bridge route'
+    const route = quote.includedSteps?.length ? `${quote.includedSteps.length} step${quote.includedSteps.length === 1 ? '' : 's'}` : 'Live route'
+    return {
+      type: 'bridge',
+      title: 'Bridge Preview',
+      status: 'pending',
+      rows: [
+        { label: 'From', value: `${fromAmount} ${quote.action.fromToken.symbol} on ${input.fromChainName}` },
+        { label: 'To', value: `~${toAmount} ${quote.action.toToken.symbol} on ${input.toChainName}`, highlight: true },
+        { label: 'Min received', value: `${minReceived} ${quote.action.toToken.symbol}` },
+        { label: 'Protocol', value: protocol },
+        { label: 'Route', value: route },
+        { label: 'Bridge fee', value: feeUsd },
+        { label: 'Est. gas', value: gasUsd },
+      ],
+      metadata: {
+        kind: 'bridge',
+        routeId: quote.id,
+        tool: quote.toolDetails?.name,
+        fromChainId,
+        toChainId,
+        fromTokenSymbol: quote.action.fromToken.symbol,
+        toTokenSymbol: quote.action.toToken.symbol,
+        fromTokenAddress: fromToken.address,
+        toTokenAddress: toToken.address,
+        fromTokenDecimals: quote.action.fromToken.decimals,
+        toTokenDecimals: quote.action.toToken.decimals,
+        fromAmount: quote.action.fromAmount,
+        toAmount: quote.estimate?.toAmount,
+        toAmountMin: quote.estimate?.toAmountMin,
+        estimatedGasUsd: quote.estimate?.gasCosts?.reduce((sum, gas) => sum + Number(gas.amountUSD ?? 0), 0) ?? undefined,
+        estimatedFeeUsd: quote.estimate?.feeCosts?.reduce((sum, fee) => sum + Number(fee.amountUSD ?? 0), 0) ?? undefined,
+        steps: quote.includedSteps?.length,
+      },
+    } satisfies AgentActionCard
+  } catch (error) {
+    return new Error(error instanceof Error ? error.message : 'Bridge quote failed.')
+  }
+}
+
+function resolveSwapTokenConfig(tokens: TokenBalance[], symbol: string, chainId: number) {
+  const walletToken = tokens.find((token) => token.symbol === symbol && token.chainId === chainId)
+  if (walletToken) {
+    return {
+      address: walletToken.address === 'native' ? '0x0000000000000000000000000000000000000000' : walletToken.address,
+      decimals: walletToken.decimals,
+    }
+  }
+  return getKnownTokenConfig(symbol, chainId)
+}
+
+function getKnownTokenConfig(symbol: string, chainId: number) {
+  const normalized = symbol.toUpperCase()
+  const knownTokens: Record<string, { decimals: number; addresses: Partial<Record<1 | 8453, string>> }> = {
+    ETH: { decimals: 18, addresses: { 1: '0x0000000000000000000000000000000000000000', 8453: '0x0000000000000000000000000000000000000000' } },
+    WETH: { decimals: 18, addresses: { 1: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2', 8453: '0x4200000000000000000000000000000000000006' } },
+    USDC: { decimals: 6, addresses: { 1: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', 8453: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913' } },
+    USDT: { decimals: 6, addresses: { 1: '0xdAC17F958D2ee523a2206206994597C13D831ec7', 8453: '0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2' } },
+    DAI: { decimals: 18, addresses: { 1: '0x6B175474E89094C44Da98b954EedeAC495271d0F', 8453: '0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb' } },
+  }
+  const config = knownTokens[normalized]
+  const address = config?.addresses[chainId as 1 | 8453]
+  if (!config || !address) return null
+  return { address, decimals: config.decimals }
+}
+
+function toRawAmount(amount: string, decimals: number) {
+  const [wholePart, fractionPart = ''] = amount.trim().split('.')
+  const normalizedWhole = wholePart === '' ? '0' : wholePart
+  const normalizedFraction = fractionPart.replace(/\D/g, '').slice(0, decimals).padEnd(decimals, '0')
+  const raw = `${normalizedWhole}${normalizedFraction}`.replace(/^0+(?=\d)/, '')
+  return raw || '0'
+}
+
+function formatTokenAmount(value: string | undefined | null, decimals: number, precision = 6) {
+  if (!value) return '0'
+  const bigintValue = BigInt(value)
+  const padded = bigintValue.toString().padStart(decimals + 1, '0')
+  const whole = padded.slice(0, -decimals)
+  const fraction = padded.slice(-decimals).replace(/0+$/, '').slice(0, precision)
+  return fraction ? `${whole}.${fraction}` : whole
+}
+
+function formatUsdValue(value: number | null) {
+  if (!value || !Number.isFinite(value)) return 'Unavailable'
+  if (value < 0.01) return '<$0.01'
+  return `$${value.toFixed(2)}`
+}
+
+function computeSwapRate(fromAmount: string, toAmount: string) {
+  const from = Number.parseFloat(fromAmount)
+  const to = Number.parseFloat(toAmount)
+  if (!Number.isFinite(from) || !Number.isFinite(to) || from <= 0) return null
+  return (to / from).toFixed(6)
 }
