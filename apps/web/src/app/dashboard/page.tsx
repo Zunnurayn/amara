@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useTransition } from 'react'
 import { useRouter }   from 'next/navigation'
 import Link from 'next/link'
 import { getSwapQuote } from '@anara/chain'
@@ -22,7 +22,13 @@ export default function DashboardPage() {
   const [showBrief, setShowBrief]   = useState(true)
   const [activeTab, setActiveTab]   = useState<'activity' | 'assets' | 'nfts'>('assets')
   const [chainOpen, setChainOpen]   = useState(false)
+  const [profileOpen, setProfileOpen] = useState(false)
+  const [isRefreshing, setIsRefreshing] = useState(false)
+  const [isLoggingOut, setIsLoggingOut] = useState(false)
   const [trackedDashboardLoad, setTrackedDashboardLoad] = useState(false)
+  const emailAddress = user?.email?.address ?? null
+  const profileLabel = user?.email?.address?.[0]?.toUpperCase() ?? 'S'
+  const shortWallet = address ? `${address.slice(0, 6)}…${address.slice(-4)}` : null
 
   useEffect(() => {
     if (ready && !authenticated) router.push('/onboard')
@@ -82,153 +88,216 @@ export default function DashboardPage() {
       <KenteStrip height={4} />
 
       {/* ── Status bar ── */}
-      <header className="flex items-center justify-between px-4 py-3 bg-soil border-b border-border">
-        <div className="flex items-center gap-3">
-          <AnaraLogo size={32} />
-          <div>
-            <div className="font-display font-black text-lg leading-tight">Anara</div>
-            <div className="text-[9px] text-muted tracking-widest uppercase">Assisted · Base + Ethereum</div>
+      <header className="sticky top-0 z-20 bg-soil/95 backdrop-blur border-b border-border">
+        <div className="mx-auto flex w-full max-w-7xl items-center justify-between gap-4 px-4 py-3 md:px-6 xl:px-8">
+          <div className="flex items-center gap-3">
+            <AnaraLogo size={32} />
+            <div>
+              <div className="font-display font-black text-lg leading-tight">Amara</div>
+              <div className="text-[9px] text-muted tracking-widest uppercase">Assisted · Base + Ethereum</div>
+            </div>
           </div>
-        </div>
 
-        <div className="flex items-center gap-3">
-          {/* Chain dropdown */}
-          <div className="relative">
-            <button
-              onClick={() => setChainOpen(v => !v)}
-              className="flex items-center gap-1.5 bg-clay border border-border px-2.5 py-1.5 text-[9px] font-bold font-mono tracking-wide text-text2 hover:border-border2 transition-colors"
-            >
-              {chains.slice(0, 3).map((chain) => (
-                <span
-                  key={chain.chainId}
-                  className="inline-flex"
-                >
-                  <ChainLogo chainId={chain.chainId} size={10} />
+          <div className="flex items-center gap-3">
+            <div className="hidden xl:flex items-center gap-3 border border-border bg-clay/65 px-3 py-2">
+              <div className="text-right">
+                <div className="text-[9px] font-bold tracking-[0.18em] uppercase text-muted">Workspace</div>
+                <div className="text-[12px] text-text2">
+                  {emailAddress ? emailAddress.split('@')[0] : 'Wallet operator'}
+                </div>
+              </div>
+              <div className="h-8 w-px bg-border" />
+              <div className="text-left">
+                <div className="text-[9px] font-bold tracking-[0.18em] uppercase text-muted">Active wallet</div>
+                <div className="text-[12px] font-mono text-text2">{shortWallet ?? 'No wallet'}</div>
+              </div>
+            </div>
+
+            <div className="relative hidden md:block">
+              <button
+                onClick={() => setChainOpen(v => !v)}
+                className="flex items-center gap-1.5 bg-clay border border-border px-2.5 py-1.5 text-[9px] font-bold font-mono tracking-wide text-text2 hover:border-border2 transition-colors"
+              >
+                {chains.slice(0, 3).map((chain) => (
+                  <span
+                    key={chain.chainId}
+                    className="inline-flex"
+                  >
+                    <ChainLogo chainId={chain.chainId} size={10} />
+                  </span>
+                ))}
+                <span className="ml-1">{Math.max(chains.length, 1)} {chains.length === 1 ? 'chain' : 'chains'} ▾</span>
+              </button>
+              {chainOpen && (
+                <>
+                  <div className="fixed inset-0 z-10" onClick={() => setChainOpen(false)} />
+                  <ChainMenu />
+                </>
+              )}
+            </div>
+
+            <div className="hidden md:flex items-center gap-1.5 border border-green/25 bg-green/5 px-3 py-1.5">
+              <LiveDot />
+              <span className="text-[9px] font-bold text-green tracking-widest uppercase">Agent Ready</span>
+            </div>
+
+            <div className="relative">
+              <button
+                onClick={() => setProfileOpen((current) => !current)}
+                className="flex items-center gap-2 border border-border bg-clay/65 px-2 py-1.5 hover:border-border2 transition-colors"
+                title="Profile"
+              >
+                <span className="flex h-8 w-8 items-center justify-center bg-gold text-earth font-black text-sm font-display">
+                  {profileLabel}
                 </span>
-              ))}
-              <span className="ml-1">{Math.max(chains.length, 1)} {chains.length === 1 ? 'chain' : 'chains'} ▾</span>
-            </button>
-            {chainOpen && (
-              <>
-                <div className="fixed inset-0 z-10" onClick={() => setChainOpen(false)} />
-                <ChainMenu />
-              </>
-            )}
+                <span className="hidden md:block text-left">
+                  <span className="block text-[10px] font-bold tracking-[0.16em] uppercase text-muted">Profile</span>
+                  <span className="block max-w-[120px] truncate text-[12px] text-text2">
+                    {emailAddress ? emailAddress.split('@')[0] : 'Account'}
+                  </span>
+                </span>
+                <span className="hidden md:block text-[10px] text-muted">▾</span>
+              </button>
+              {profileOpen && (
+                <>
+                  <div className="fixed inset-0 z-10" onClick={() => setProfileOpen(false)} />
+                  <ProfileMenu
+                    emailAddress={emailAddress}
+                    walletAddress={address}
+                    totalUsd={totalUsd}
+                    isLoggingOut={isLoggingOut}
+                    onLogout={async () => {
+                      setIsLoggingOut(true)
+                      try {
+                        await logout()
+                      } finally {
+                        setIsLoggingOut(false)
+                      }
+                    }}
+                    onClose={() => setProfileOpen(false)}
+                  />
+                </>
+              )}
+            </div>
           </div>
-
-          {/* Live agent pip */}
-          <div className="flex items-center gap-1.5 border border-green/25 bg-green/5 px-3 py-1.5">
-            <LiveDot />
-            <span className="text-[9px] font-bold text-green tracking-widest uppercase">Agent Ready</span>
-          </div>
-
-          {/* Avatar / logout */}
-          <button
-            onClick={logout}
-            className="w-8 h-8 bg-gold flex items-center justify-content-center text-earth font-black text-sm font-display"
-            title="Log out"
-          >
-            {user?.email?.address?.[0]?.toUpperCase() ?? 'S'}
-          </button>
         </div>
       </header>
 
       {/* ── Main content ── */}
-      <main className="flex-1 max-w-md mx-auto w-full pb-8">
+      <main className="flex-1 mx-auto w-full max-w-7xl px-4 pb-8 pt-5 md:px-6 xl:px-8 xl:pb-12">
         {error && (
-          <div className="mx-4 mt-4 border border-kola/30 bg-kola/10 px-4 py-3 text-[12px] text-text2">
+          <div className="border border-kola/30 bg-kola/10 px-4 py-3 text-[12px] text-text2">
             <div className="font-bold text-kola mb-1">Wallet data is partially unavailable</div>
             <div>{error}</div>
             <button
-              onClick={() => refreshWallet()}
-              className="mt-2 text-[11px] font-bold uppercase tracking-wide text-gold2 hover:text-gold"
+              onClick={async () => {
+                setIsRefreshing(true)
+                try {
+                  await refreshWallet()
+                } finally {
+                  setIsRefreshing(false)
+                }
+              }}
+              disabled={isRefreshing}
+              className="mt-2 text-[11px] font-bold uppercase tracking-wide text-gold2 hover:text-gold disabled:opacity-60"
             >
-              Retry refresh
+              {isRefreshing ? 'Refreshing…' : 'Retry refresh'}
             </button>
           </div>
         )}
 
         {!error && lastUpdated && (
-          <div className="mx-4 mt-4 text-[10px] font-mono text-muted">
+          <div className="mt-3 text-[10px] font-mono text-muted">
             Last synced {formatRelativeSync(lastUpdated)}
           </div>
         )}
 
-        {/* Portfolio hero */}
-        <PortfolioHero totalUsd={totalUsd} chains={chains} tokenCount={tokens.length} nftCount={nfts.length} />
+        <div className="mt-5 grid gap-6 xl:grid-cols-[minmax(0,1.4fr)_minmax(340px,0.9fr)] xl:items-start">
+          <section className="space-y-4">
+            <PortfolioHero
+              totalUsd={totalUsd}
+              chains={chains}
+              tokenCount={tokens.length}
+              nftCount={nfts.length}
+              isRefreshing={isRefreshing || isLoading}
+              onRefresh={async () => {
+                setIsRefreshing(true)
+                try {
+                  await refreshWallet()
+                } finally {
+                  setIsRefreshing(false)
+                }
+              }}
+            />
 
-        {/* Proverb ticker */}
-        <div className="flex items-center gap-3 bg-clay border-x border-b border-border px-4 py-2 overflow-hidden">
-          <span className="text-[8px] font-bold text-gold tracking-[0.18em] uppercase flex-shrink-0">Ọrọ àṣà</span>
-          <span className="text-[10px] text-muted italic whitespace-nowrap animate-ticker">
-            "The wealth of a man is not in his pocket, but in the land he cultivates." &nbsp;·&nbsp; "Oní owó ló ní ọrọ." &nbsp;·&nbsp; Brickt — African land. Global capital.
-          </span>
-        </div>
-
-        {/* Strategy cards */}
-        <div className="px-4 pt-4 pb-2">
-          <div className="text-[9px] font-bold tracking-[0.2em] text-muted uppercase mb-3">Strategies</div>
-          <div className="flex gap-2.5 overflow-x-auto pb-1 -mx-4 px-4 scrollbar-hide">
-            {STRATEGY_CARDS.map(s => (
-              <StrategyCard key={s.id} {...s} />
-            ))}
-          </div>
-        </div>
-
-        {/* Inline tabs */}
-        <div className="px-4 pt-4">
-          <div className="text-[9px] font-bold tracking-[0.2em] text-muted uppercase mb-3">Wallet</div>
-          <Card kente>
-            {/* Tab bar */}
-            <div className="sticky top-0 z-10 flex bg-clay border-b border-border">
-              {(['assets', 'activity', 'nfts'] as const).map(tab => (
-                <button
-                  key={tab}
-                  onClick={() => setActiveTab(tab)}
-                  className={`flex-1 py-2.5 text-[11px] font-bold tracking-wider uppercase border-b-2 transition-colors ${
-                    activeTab === tab
-                      ? 'text-gold2 border-gold2'
-                      : 'text-muted border-transparent hover:text-text2'
-                  }`}
-                >
-                  {tab}
-                </button>
-              ))}
-            </div>
-
-            {/* Tab content */}
-            <div className="min-h-[200px] max-h-[26rem] md:max-h-[34rem] overflow-y-auto overscroll-contain">
-              {activeTab === 'activity' && <ActivityTab transactions={transactions} isLoading={isLoading} error={error} />}
-              {activeTab === 'assets'   && <AssetsTab tokens={tokens} />}
-              {activeTab === 'nfts'     && <NFTsTab nfts={nfts} isLoading={isLoading} error={error} />}
-            </div>
-          </Card>
-        </div>
-
-        {/* Agent stats */}
-        <div className="px-4 pt-4">
-          <StatGrid stats={[
-            { label: 'Actions today',  value: String(agentState.actionsToday || 0) },
-            { label: 'Profit today',   value: agentState.profitToday || '$0.00', color: colors.green },
-            { label: 'Errors',         value: String(agentState.errorsToday || 0),  color: agentState.errorsToday ? colors.kola : colors.green },
-            { label: 'Wallet assets',  value: String(tokens.length + nfts.length), color: colors.teal },
-          ]} />
-        </div>
-
-        {!brief && !isLoading && (
-          <div className="px-4 pt-4">
-            <Card>
-              <div className="p-4 text-[12px] text-muted">
-                No recent agent brief is available yet. Open chat to issue your first action or refresh once activity exists.
+            <div className="overflow-hidden border border-border bg-clay/60 shadow-[0_12px_30px_rgba(0,0,0,0.12)]">
+              <div className="flex items-center gap-3 px-4 py-2 overflow-hidden">
+                <span className="text-[8px] font-bold text-gold tracking-[0.18em] uppercase flex-shrink-0">Ọrọ àṣà</span>
+                <span className="text-[10px] text-muted italic whitespace-nowrap animate-ticker">
+                  "The wealth of a man is not in his pocket, but in the land he cultivates." &nbsp;·&nbsp; "Oní owó ló ní ọrọ." &nbsp;·&nbsp; Brickt — African land. Global capital.
+                </span>
               </div>
-            </Card>
-          </div>
-        )}
+            </div>
+
+            <div className="xl:hidden">
+              <WalletPanel
+                activeTab={activeTab}
+                onTabChange={setActiveTab}
+                transactions={transactions}
+                tokens={tokens}
+                nfts={nfts}
+                isLoading={isLoading}
+                error={error}
+              />
+            </div>
+          </section>
+
+          <aside className="space-y-4 xl:sticky xl:top-24">
+            <section>
+              <div className="text-[9px] font-bold tracking-[0.2em] text-muted uppercase mb-3">Strategies</div>
+              <div className="flex gap-2.5 overflow-x-auto pb-1 -mx-4 px-4 scrollbar-hide md:mx-0 md:px-0 lg:grid lg:grid-cols-2 lg:overflow-visible lg:gap-3 lg:pb-0">
+                {STRATEGY_CARDS.map(s => (
+                  <StrategyCard key={s.id} {...s} />
+                ))}
+              </div>
+            </section>
+
+            <section>
+              <div className="text-[9px] font-bold tracking-[0.2em] text-muted uppercase mb-3">Agent Snapshot</div>
+              <StatGrid stats={[
+                { label: 'Actions today',  value: String(agentState.actionsToday || 0) },
+                { label: 'Profit today',   value: agentState.profitToday || '$0.00', color: colors.green },
+                { label: 'Errors',         value: String(agentState.errorsToday || 0),  color: agentState.errorsToday ? colors.kola : colors.green },
+                { label: 'Wallet assets',  value: String(tokens.length + nfts.length), color: colors.teal },
+              ]} />
+            </section>
+
+            {!brief && !isLoading && (
+              <Card>
+                <div className="p-4 text-[12px] text-muted leading-6">
+                  No recent agent brief is available yet. Open chat to issue your first action or refresh once activity exists.
+                </div>
+              </Card>
+            )}
+          </aside>
+        </div>
+
+        <div className="mt-6 hidden xl:block">
+          <WalletPanel
+            activeTab={activeTab}
+            onTabChange={setActiveTab}
+            transactions={transactions}
+            tokens={tokens}
+            nfts={nfts}
+            isLoading={isLoading}
+            error={error}
+          />
+        </div>
       </main>
       {/* Agent FAB */}
       <button
         onClick={() => { setChatOpen(true); router.push('/dashboard/chat') }}
-        className="fixed bottom-6 right-4 w-14 h-14 rounded-full bg-gold flex items-center justify-center text-2xl z-20"
+        className="fixed bottom-6 right-4 w-14 h-14 rounded-full bg-gold flex items-center justify-center text-2xl z-20 lg:hidden"
         style={{ boxShadow: shadows.gold }}
       >
         🤖
@@ -246,7 +315,7 @@ function LoadingSplash() {
   return (
     <div className="min-h-screen bg-earth flex flex-col items-center justify-center gap-4">
       <AnaraLogo size={48} />
-      <div className="text-[10px] font-mono text-muted tracking-widest animate-pulse">LOADING WALLET…</div>
+      <div className="text-[10px] font-mono text-muted tracking-widest animate-pulse">LOADING AMARA…</div>
     </div>
   )
 }
@@ -1147,21 +1216,38 @@ function PortfolioHero({
   chains,
   tokenCount,
   nftCount,
+  isRefreshing,
+  onRefresh,
 }: {
   totalUsd: string
   chains: WalletChainSummary[]
   tokenCount: number
   nftCount: number
+  isRefreshing: boolean
+  onRefresh: () => void | Promise<void>
 }) {
   const router = useRouter()
   const setChatOpen = useAgentStore((state) => state.setChatOpen)
+  const [isNavigating, startNavigation] = useTransition()
+  const [pendingAction, setPendingAction] = useState<'send' | 'receive' | 'swap' | 'bridge' | null>(null)
   const chainBreakdown = chains.filter((chain) => parseUsdAmount(chain.totalUsd) > 0)
   const totalValue = Math.max(parseUsdAmount(totalUsd), 0.01)
   return (
-    <Card kente className="mx-4 mt-3">
+    <Card kente className="shadow-[0_18px_40px_rgba(0,0,0,0.18)]">
       <div className="p-4">
-        <div className="text-[9px] font-bold tracking-[0.2em] text-muted uppercase mb-2">Total Portfolio Value</div>
-        <div className="font-display font-black text-[2.8rem] leading-none">
+        <div className="mb-2 flex items-center justify-between gap-3">
+          <div className="text-[9px] font-bold tracking-[0.2em] text-muted uppercase">Total Portfolio Value</div>
+          <button
+            onClick={() => { void onRefresh() }}
+            disabled={isRefreshing}
+            className="flex h-8 w-8 items-center justify-center rounded-full border border-border bg-clay text-text2 transition-colors hover:border-border2 disabled:opacity-60"
+            title="Refresh balances"
+            aria-label="Refresh balances"
+          >
+            <span className={isRefreshing ? 'animate-spin' : ''}>↻</span>
+          </button>
+        </div>
+        <div className="font-display font-black text-[2.8rem] leading-none md:text-[3.15rem] xl:text-[3.5rem]">
           <span className="text-gold2">$</span>
           {totalUsd.replace('$','').split('.')[0]}
           <span className="text-2xl text-muted font-bold">.{totalUsd.split('.')[1] ?? '00'}</span>
@@ -1175,7 +1261,7 @@ function PortfolioHero({
       </div>
 
       {/* Stats row */}
-      <div className="flex border-t border-border">
+      <div className="grid grid-cols-3 border-t border-border">
         {[
           { label: 'Base',      value: formatChainTotal(chains, 8453),  color: colors.chains.base, chainId: 8453 },
           { label: 'Ethereum',  value: formatChainTotal(chains, 1),     color: colors.chains.eth, chainId: 1 },
@@ -1192,7 +1278,7 @@ function PortfolioHero({
       </div>
 
       {/* Action buttons */}
-      <div className="flex gap-2 p-3 border-t border-border">
+      <div className="grid grid-cols-2 gap-2 p-3 border-t border-border sm:grid-cols-4">
         {[
           { label: 'Send',    icon: '↑', sheet: 'send'    as const, color: colors.kola   },
           { label: 'Receive', icon: '↓', sheet: 'receive' as const, color: colors.green  },
@@ -1202,14 +1288,20 @@ function PortfolioHero({
           <button
             key={a.label}
             onClick={() => {
-              setChatOpen(true)
-              router.push(`/dashboard/chat?action=${a.sheet}`)
+              setPendingAction(a.sheet)
+              startNavigation(() => {
+                setChatOpen(true)
+                router.push(`/dashboard/chat?action=${a.sheet}`)
+              })
             }}
-            className="flex-1 flex flex-col items-center gap-1 py-2.5 bg-clay2 border border-border hover:border-border2 transition-colors"
+            disabled={isNavigating}
+            className="flex-1 flex flex-col items-center gap-1 py-2.5 bg-clay2 border border-border hover:border-border2 transition-colors disabled:opacity-60"
             style={{ borderTopWidth: 2, borderTopColor: a.color }}
           >
             <span className="text-base">{a.icon}</span>
-            <span className="text-[9px] font-bold uppercase tracking-wider text-text2">{a.label}</span>
+            <span className="text-[9px] font-bold uppercase tracking-wider text-text2">
+              {isNavigating && pendingAction === a.sheet ? 'Opening…' : a.label}
+            </span>
           </button>
         ))}
       </div>
@@ -1242,11 +1334,17 @@ const STRATEGY_CARDS = [
 
 function StrategyCard({ id, icon, name, pnl, sub, accent, status }: typeof STRATEGY_CARDS[0]) {
   const router = useRouter()
+  const [isNavigating, startNavigation] = useTransition()
   const isNeutral = id === 'reb'
   return (
     <button
-      onClick={() => router.push(`/dashboard/strategy/${id}`)}
-      className="flex-shrink-0 w-32 bg-soil border border-border text-left hover:border-border2 transition-all hover:-translate-y-0.5 relative overflow-hidden"
+      onClick={() => {
+        startNavigation(() => {
+          router.push(`/dashboard/strategy/${id}`)
+        })
+      }}
+      disabled={isNavigating}
+      className="flex-shrink-0 w-32 bg-soil border border-border text-left hover:border-border2 transition-all hover:-translate-y-0.5 relative overflow-hidden disabled:opacity-60 lg:w-auto lg:min-h-[152px]"
     >
       <div style={{ height: 2, background: accent }} />
       <div className="p-3">
@@ -1257,7 +1355,7 @@ function StrategyCard({ id, icon, name, pnl, sub, accent, status }: typeof STRAT
             style={{ color: accent, borderColor: `${accent}40`, background: `${accent}15` }}
           >{status}</span>
         </div>
-        <div className="text-[9px] font-bold text-muted uppercase tracking-wide mb-1.5">{name}</div>
+        <div className="text-[9px] font-bold text-muted uppercase tracking-wide mb-1.5">{isNavigating ? 'Opening…' : name}</div>
         <div
           className="font-display font-bold text-lg leading-none"
           style={{ color: isNeutral ? colors.muted : colors.green }}
@@ -1389,6 +1487,53 @@ function EmptyTabState({ message }: { message: string }) {
   return <div className="p-6 text-sm text-muted leading-6">{message}</div>
 }
 
+function WalletPanel({
+  activeTab,
+  onTabChange,
+  transactions,
+  tokens,
+  nfts,
+  isLoading,
+  error,
+}: {
+  activeTab: 'activity' | 'assets' | 'nfts'
+  onTabChange: (tab: 'activity' | 'assets' | 'nfts') => void
+  transactions: any[]
+  tokens: TokenBalance[]
+  nfts: WalletNftSummary[]
+  isLoading: boolean
+  error: string | null
+}) {
+  return (
+    <section>
+      <div className="text-[9px] font-bold tracking-[0.2em] text-muted uppercase mb-3">Wallet</div>
+      <Card kente>
+        <div className="sticky top-0 z-10 flex bg-clay border-b border-border">
+          {(['assets', 'activity', 'nfts'] as const).map(tab => (
+            <button
+              key={tab}
+              onClick={() => onTabChange(tab)}
+              className={`flex-1 py-2.5 text-[11px] font-bold tracking-wider uppercase border-b-2 transition-colors ${
+                activeTab === tab
+                  ? 'text-gold2 border-gold2'
+                  : 'text-muted border-transparent hover:text-text2'
+              }`}
+            >
+              {tab}
+            </button>
+          ))}
+        </div>
+
+        <div className="min-h-[200px] max-h-[26rem] overflow-y-auto overscroll-contain md:max-h-[34rem] xl:max-h-[44rem]">
+          {activeTab === 'activity' && <ActivityTab transactions={transactions} isLoading={isLoading} error={error} />}
+          {activeTab === 'assets'   && <AssetsTab tokens={tokens} />}
+          {activeTab === 'nfts'     && <NFTsTab nfts={nfts} isLoading={isLoading} error={error} />}
+        </div>
+      </Card>
+    </section>
+  )
+}
+
 function formatTime(timestamp?: number) {
   if (!timestamp) return 'Pending'
   return new Date(timestamp).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
@@ -1401,6 +1546,57 @@ function formatRelativeSync(timestamp: number) {
   if (minutes < 60) return `${minutes}m ago`
   const hours = Math.floor(minutes / 60)
   return `${hours}h ago`
+}
+
+function ProfileMenu({
+  emailAddress,
+  walletAddress,
+  totalUsd,
+  isLoggingOut,
+  onLogout,
+  onClose,
+}: {
+  emailAddress: string | null
+  walletAddress: string | null
+  totalUsd: string
+  isLoggingOut: boolean
+  onLogout: () => void | Promise<void>
+  onClose: () => void
+}) {
+  return (
+    <div className="absolute right-0 top-[calc(100%+0.5rem)] z-20 w-[280px] border border-border bg-soil shadow-[0_24px_50px_rgba(0,0,0,0.28)]">
+      <div className="border-b border-border p-4">
+        <div className="text-[10px] font-bold tracking-[0.18em] uppercase text-muted">Operator</div>
+        <div className="mt-2 text-sm font-semibold text-text2 break-all">{emailAddress ?? 'Signed-in user'}</div>
+        <div className="mt-3 grid grid-cols-2 gap-2 text-[11px]">
+          <div className="border border-border bg-clay px-3 py-2">
+            <div className="text-[9px] uppercase tracking-[0.16em] text-muted font-bold">Portfolio</div>
+            <div className="mt-1 font-mono text-text2">{totalUsd}</div>
+          </div>
+          <div className="border border-border bg-clay px-3 py-2">
+            <div className="text-[9px] uppercase tracking-[0.16em] text-muted font-bold">Wallet</div>
+            <div className="mt-1 font-mono text-text2">{walletAddress ? `${walletAddress.slice(0, 6)}…${walletAddress.slice(-4)}` : 'Unavailable'}</div>
+          </div>
+        </div>
+      </div>
+
+      <div className="p-3 space-y-2">
+        <button
+          onClick={onClose}
+          className="w-full border border-border bg-clay px-3 py-3 text-left text-xs font-bold uppercase tracking-[0.16em] text-text2 hover:border-border2"
+        >
+          Close Menu
+        </button>
+        <button
+          onClick={onLogout}
+          disabled={isLoggingOut}
+          className="w-full border border-kola/30 bg-kola/10 px-3 py-3 text-left text-xs font-bold uppercase tracking-[0.16em] text-kola hover:bg-kola/20 disabled:opacity-60"
+        >
+          {isLoggingOut ? 'Logging Out…' : 'Log Out'}
+        </button>
+      </div>
+    </div>
+  )
 }
 
 function parseUsdAmount(value?: string) {

@@ -65,135 +65,180 @@ export default function DashboardChatPage() {
 
   return (
     <div className="min-h-screen bg-earth text-cream flex flex-col">
-      <header className="sticky top-0 z-20 border-b border-border px-4 py-3 flex items-center justify-between bg-soil/95 backdrop-blur">
-        <div>
-          <div className="text-[10px] uppercase tracking-[0.2em] text-green font-bold">Agent Chat</div>
-          <div className="text-sm text-muted">Execute swaps, sends, and bridges with confirmation.</div>
-        </div>
-        <div className="flex items-center gap-2">
-          {!!messages.length && (
-            <button
-              onClick={clearChat}
-              className="text-xs border border-border px-3 py-1.5 hover:border-kola/40 hover:text-kola transition-colors"
-            >
-              Clear
+      <header className="sticky top-0 z-20 border-b border-border bg-soil/95 backdrop-blur">
+        <div className="mx-auto flex w-full max-w-7xl items-center justify-between gap-4 px-4 py-3 md:px-6 xl:px-8">
+          <div>
+            <div className="text-[10px] uppercase tracking-[0.2em] text-green font-bold">Agent Chat</div>
+            <div className="text-sm text-muted">Execute swaps, sends, and bridges with confirmation.</div>
+          </div>
+          <div className="flex items-center gap-2">
+            {!!messages.length && (
+              <button
+                onClick={clearChat}
+                className="text-xs border border-border px-3 py-1.5 hover:border-kola/40 hover:text-kola transition-colors"
+              >
+                Clear
+              </button>
+            )}
+            <button onClick={() => router.back()} className="text-xs text-muted hover:text-cream transition-colors">
+              Back
             </button>
-          )}
-          <button onClick={() => router.back()} className="text-xs text-muted hover:text-cream transition-colors">
-            Back
-          </button>
-          <button onClick={() => router.push('/dashboard')} className="text-xs border border-border px-3 py-1.5 hover:border-border2 transition-colors">
-            Close
-          </button>
+            <button onClick={() => router.push('/dashboard')} className="text-xs border border-border px-3 py-1.5 hover:border-border2 transition-colors">
+              Close
+            </button>
+          </div>
         </div>
       </header>
 
-      <main className="flex-1 max-w-3xl mx-auto w-full px-4 py-5 flex flex-col gap-4">
-        {!hasWallet && (
-          <div className="bg-kola/10 border border-kola/30 px-4 py-3 text-sm text-text2">
-            Link a wallet first to use agent execution flows. Chat remains visible, but send and confirm actions are disabled until a wallet is available.
-          </div>
-        )}
-
-        {hasWallet && address && (
-          <div className="bg-clay border border-border px-4 py-3 text-xs font-mono text-muted">
-            Active wallet: {address.slice(0, 8)}…{address.slice(-6)}
-          </div>
-        )}
-
-        <div className="bg-soil border border-border px-4 py-3 text-xs text-muted leading-5">
-          Anara prepares previews and submits transactions only after your confirmation. Network fees, slippage, bridge delays, and external protocol failures can still affect outcomes.
-        </div>
-
-        {featureFlags?.allowBridges === false && (
-          <div className="bg-teal/10 border border-teal/30 px-4 py-3 text-xs text-text2 leading-5">
-            Bridge actions are currently disabled for this beta environment. Swap and send flows remain available.
-          </div>
-        )}
-
-        {messages.length === 0 && (
-          <div className="bg-soil border border-border p-4">
-            <div className="text-sm leading-6">
-              Tell the agent what to do. It will return an action card for anything that needs confirmation before execution.
+      <main className="mx-auto flex w-full max-w-7xl flex-1 gap-6 px-4 py-5 md:px-6 xl:px-8 xl:gap-8">
+        <section className="min-w-0 flex-1">
+          {!hasWallet && (
+            <div className="bg-kola/10 border border-kola/30 px-4 py-3 text-sm text-text2">
+              Link a wallet first to use agent execution flows. Chat remains visible, but send and confirm actions are disabled until a wallet is available.
             </div>
-            <div className="flex flex-wrap gap-2 mt-4">
+          )}
+
+          {hasWallet && address && (
+            <div className="bg-clay border border-border px-4 py-3 text-xs font-mono text-muted">
+              Active wallet: {address.slice(0, 8)}…{address.slice(-6)}
+            </div>
+          )}
+
+          <div className="mt-4 bg-soil border border-border px-4 py-3 text-xs text-muted leading-5 xl:hidden">
+            Amara prepares previews and submits transactions only after your confirmation. Network fees, slippage, bridge delays, and external protocol failures can still affect outcomes.
+          </div>
+
+          {featureFlags?.allowBridges === false && (
+            <div className="mt-4 bg-teal/10 border border-teal/30 px-4 py-3 text-xs text-text2 leading-5">
+              Bridge actions are currently disabled for this beta environment. Swap and send flows remain available.
+            </div>
+          )}
+
+          {messages.length === 0 && (
+            <div className="mt-4 bg-soil border border-border p-4">
+              <div className="text-sm leading-6">
+                Tell the agent what to do. It will return an action card for anything that needs confirmation before execution.
+              </div>
+              <div className="flex flex-wrap gap-2 mt-4">
+                {SUGGESTIONS.map((suggestion) => (
+                  <button
+                    key={suggestion}
+                    onClick={() => setInput(suggestion)}
+                    className="text-xs border border-border bg-clay px-3 py-2 hover:border-gold/40 transition-colors"
+                  >
+                    {suggestion}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="mt-4 border border-border bg-soil shadow-[0_18px_36px_rgba(0,0,0,0.14)]">
+            <div ref={scrollRef} className="flex flex-col gap-4 overflow-y-auto px-4 py-4 pr-3 xl:min-h-[calc(100vh-17rem)] xl:max-h-[calc(100vh-17rem)] xl:px-5 xl:py-5">
+              {action && (
+                <div className="mr-auto max-w-xl xl:max-w-2xl">
+                  <ChatQuickActionPanel
+                    action={action}
+                    address={address}
+                    tokens={tokens}
+                    hasWallet={hasWallet}
+                    onExecuteDirectAction={executeStandaloneAction}
+                    onClose={() => router.push('/dashboard/chat')}
+                  />
+                  <div className="mt-1 text-[10px] font-mono text-muted text-left">
+                    {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </div>
+                </div>
+              )}
+
+              {messages.map((message) => (
+                <div key={message.id} className={message.role === 'user' ? 'ml-auto max-w-xl xl:max-w-2xl' : 'mr-auto max-w-xl xl:max-w-2xl'}>
+                  {message.actionCard && (
+                    <div className="mb-2">
+                      <ActionCard
+                        card={message.actionCard}
+                        disabled={!hasWallet}
+                        onConfirm={() => executeAction(message.id, message.actionCard!)}
+                        onCancel={() => cancelAction(message.id)}
+                      />
+                    </div>
+                  )}
+                  <div className={message.role === 'user'
+                    ? 'bg-gold text-earth px-4 py-3 text-sm'
+                    : 'bg-clay/45 border border-border px-4 py-3 text-sm leading-6 break-words overflow-hidden'}>
+                    <MessageBody content={message.content} />
+                  </div>
+                  <div className={`mt-1 text-[10px] font-mono text-muted ${message.role === 'user' ? 'text-right' : 'text-left'}`}>
+                    {new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </div>
+                </div>
+              ))}
+
+              {isThinking && <TypingIndicator />}
+            </div>
+          </div>
+
+          <div className="mt-4 border border-border bg-soil px-4 py-4 shadow-[0_12px_30px_rgba(0,0,0,0.12)]">
+            <div className="flex gap-3 items-end">
+              <textarea
+                value={input}
+                onChange={(event) => setInput(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' && !event.shiftKey) {
+                    event.preventDefault()
+                    if (canSend) void handleSend()
+                  }
+                }}
+                placeholder={hasWallet ? 'Swap 0.2 ETH to USDC on Base' : 'Link a wallet to use the agent'}
+                disabled={!hasWallet}
+                className="flex-1 min-h-[90px] bg-clay border border-border text-sm px-3 py-3 outline-none focus:border-gold/40 resize-none disabled:opacity-50"
+              />
+              <Button onClick={handleSend} disabled={!canSend} loading={isThinking}>
+                Send
+              </Button>
+            </div>
+          </div>
+        </section>
+
+        <aside className="hidden xl:block xl:w-[320px] xl:flex-shrink-0 xl:space-y-4">
+          <div className="border border-border bg-soil p-4 shadow-[0_14px_30px_rgba(0,0,0,0.12)]">
+            <div className="text-[10px] font-bold tracking-[0.2em] uppercase text-muted">Execution Model</div>
+            <div className="mt-3 text-sm text-text2 leading-6">
+              Amara prepares previews and submits transactions only after your confirmation.
+            </div>
+            <div className="mt-3 text-xs text-muted leading-5">
+              Network fees, slippage, bridge delays, and external protocol failures can still affect outcomes.
+            </div>
+          </div>
+
+          <div className="border border-border bg-soil p-4 shadow-[0_14px_30px_rgba(0,0,0,0.12)]">
+            <div className="text-[10px] font-bold tracking-[0.2em] uppercase text-muted">Quick Prompts</div>
+            <div className="mt-4 space-y-2">
               {SUGGESTIONS.map((suggestion) => (
                 <button
                   key={suggestion}
                   onClick={() => setInput(suggestion)}
-                  className="text-xs border border-border bg-clay px-3 py-2 hover:border-gold/40 transition-colors"
+                  className="w-full text-left text-xs border border-border bg-clay px-3 py-3 hover:border-gold/40 transition-colors"
                 >
                   {suggestion}
                 </button>
               ))}
             </div>
           </div>
-        )}
 
-        <div ref={scrollRef} className="flex flex-col gap-3 overflow-y-auto pr-1">
-          {action && (
-            <div className="mr-auto max-w-xl">
-              <ChatQuickActionPanel
-                action={action}
-                address={address}
-                tokens={tokens}
-                hasWallet={hasWallet}
-                onExecuteDirectAction={executeStandaloneAction}
-                onClose={() => router.push('/dashboard/chat')}
-              />
-              <div className="mt-1 text-[10px] font-mono text-muted text-left">
-                {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-              </div>
+          {featureFlags?.allowBridges === false && (
+            <div className="border border-teal/30 bg-teal/10 px-4 py-3 text-xs text-text2 leading-5 shadow-[0_12px_24px_rgba(0,0,0,0.08)]">
+              Bridge actions are currently disabled for this beta environment. Swap and send flows remain available.
             </div>
           )}
 
-          {messages.map((message) => (
-            <div key={message.id} className={message.role === 'user' ? 'ml-auto max-w-xl' : 'mr-auto max-w-xl'}>
-              {message.actionCard && (
-                <div className="mb-2">
-                  <ActionCard
-                    card={message.actionCard}
-                    disabled={!hasWallet}
-                    onConfirm={() => executeAction(message.id, message.actionCard!)}
-                    onCancel={() => cancelAction(message.id)}
-                  />
-                </div>
-              )}
-              <div className={message.role === 'user'
-                ? 'bg-gold text-earth px-4 py-3 text-sm'
-                : 'bg-soil border border-border px-4 py-3 text-sm leading-6 break-words overflow-hidden'}>
-                <MessageBody content={message.content} />
-              </div>
-              <div className={`mt-1 text-[10px] font-mono text-muted ${message.role === 'user' ? 'text-right' : 'text-left'}`}>
-                {new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-              </div>
+          {hasWallet && address && (
+            <div className="border border-border bg-soil px-4 py-3 text-xs font-mono text-muted shadow-[0_12px_24px_rgba(0,0,0,0.08)]">
+              Active wallet: {address.slice(0, 8)}…{address.slice(-6)}
             </div>
-          ))}
-
-          {isThinking && <TypingIndicator />}
-        </div>
+          )}
+        </aside>
       </main>
-
-      <div className="border-t border-border bg-soil px-4 py-4">
-        <div className="max-w-3xl mx-auto flex gap-3 items-end">
-          <textarea
-            value={input}
-            onChange={(event) => setInput(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter' && !event.shiftKey) {
-                event.preventDefault()
-                if (canSend) void handleSend()
-              }
-            }}
-            placeholder={hasWallet ? 'Swap 0.2 ETH to USDC on Base' : 'Link a wallet to use the agent'}
-            disabled={!hasWallet}
-            className="flex-1 min-h-[80px] bg-clay border border-border text-sm px-3 py-3 outline-none focus:border-gold/40 resize-none disabled:opacity-50"
-          />
-          <Button onClick={handleSend} disabled={!canSend} loading={isThinking}>
-            Send
-          </Button>
-        </div>
-      </div>
     </div>
   )
 }
@@ -274,6 +319,7 @@ function ChatQuickActionPanel({
   const [sendChain, setSendChain] = useState<'Base' | 'Ethereum'>('Base')
   const [sendPreviewCard, setSendPreviewCard] = useState<AgentActionCard | null>(null)
   const [sendPreviewError, setSendPreviewError] = useState<string | null>(null)
+  const [isSendPreviewLoading, setIsSendPreviewLoading] = useState(false)
   const [swapFromToken, setSwapFromToken] = useState(defaultToken)
   const [swapToToken, setSwapToToken] = useState(tokenOptions.find((token) => token.symbol !== defaultToken)?.symbol ?? 'USDC')
   const [swapAmount, setSwapAmount] = useState('')
@@ -296,23 +342,28 @@ function ChatQuickActionPanel({
     window.setTimeout(() => setCopied(false), 1500)
   }
 
-  function handlePreviewSend() {
-    const preview = buildDirectSendPreviewCard({
-      tokens,
-      symbol: sendToken,
-      amount: sendAmount,
-      toAddress: sendAddress,
-      chainName: sendChain,
-    })
+  async function handlePreviewSend() {
+    setIsSendPreviewLoading(true)
+    try {
+      const preview = buildDirectSendPreviewCard({
+        tokens,
+        symbol: sendToken,
+        amount: sendAmount,
+        toAddress: sendAddress,
+        chainName: sendChain,
+      })
 
-    if (preview instanceof Error) {
-      setSendPreviewError(preview.message)
-      setSendPreviewCard(null)
-      return
+      if (preview instanceof Error) {
+        setSendPreviewError(preview.message)
+        setSendPreviewCard(null)
+        return
+      }
+
+      setSendPreviewError(null)
+      setSendPreviewCard(preview)
+    } finally {
+      setIsSendPreviewLoading(false)
     }
-
-    setSendPreviewError(null)
-    setSendPreviewCard(preview)
   }
 
   async function handlePreviewSwap() {
@@ -366,7 +417,7 @@ function ChatQuickActionPanel({
   }
 
   return (
-    <div className="bg-soil border border-border px-4 py-4 text-sm leading-6">
+    <div className="bg-soil border border-border px-4 py-4 text-sm leading-6 xl:max-w-2xl">
       <div className="flex items-start justify-between gap-4">
         <div>
           <div className="text-sm text-text2">
@@ -426,7 +477,13 @@ function ChatQuickActionPanel({
               </select>
             )}
           />
-          <button onClick={handlePreviewSend} className="w-full bg-gold text-earth font-bold text-xs uppercase tracking-wide px-4 py-3">Preview Send</button>
+          <button
+            onClick={() => { void handlePreviewSend() }}
+            disabled={isSendPreviewLoading}
+            className="w-full bg-gold text-earth font-bold text-xs uppercase tracking-wide px-4 py-3 disabled:opacity-60"
+          >
+            {isSendPreviewLoading ? 'Loading Preview…' : 'Preview Send'}
+          </button>
           {sendPreviewError && <div className="border border-kola/30 bg-kola/10 px-4 py-3 text-xs text-text2">{sendPreviewError}</div>}
           {sendPreviewCard && (
             <PreviewModal
@@ -561,7 +618,7 @@ function PreviewModal({
         className="absolute inset-0 bg-earth/75"
         onClick={terminalState ? onClose : undefined}
       />
-      <div className="absolute inset-x-0 bottom-0 mx-auto w-full max-w-md border border-border bg-soil shadow-2xl">
+      <div className="absolute inset-x-0 bottom-0 mx-auto w-full max-w-md border border-border bg-soil shadow-2xl xl:bottom-auto xl:left-1/2 xl:top-1/2 xl:max-w-xl xl:-translate-x-1/2 xl:-translate-y-1/2">
         <div className="flex items-center justify-between border-b border-border px-4 py-3">
           <div>
             <div className="text-[10px] font-bold tracking-[0.2em] uppercase text-muted">Action Preview</div>

@@ -43,7 +43,7 @@ export default function OnboardPage() {
       <nav className="flex items-center justify-between px-6 py-4 border-b border-border">
         <div className="flex items-center gap-3">
           <AnaraLogo size={32} />
-          <span className="font-display font-black text-xl">Anara</span>
+          <span className="font-display font-black text-xl">Amara</span>
         </div>
         <div className="flex items-center gap-2">
           <LiveDot />
@@ -112,7 +112,7 @@ export default function OnboardPage() {
         </div>
 
         <p className="text-muted2 text-xs mt-8 leading-relaxed max-w-sm">
-          By continuing, you agree to Anara's Terms of Service and Privacy Policy.
+          By continuing, you agree to Amara's Terms of Service and Privacy Policy.
           Your keys stay yours — always.
         </p>
       </main>

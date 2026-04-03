@@ -3,14 +3,14 @@ import { Providers } from './providers'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title:       'Anara Wallet — AI-Assisted Base + Ethereum Wallet',
+  title:       'Amara Wallet — AI-Assisted Base + Ethereum Wallet',
   description: 'AI-assisted wallet for Base and Ethereum. Review route previews, confirm execution, and track wallet activity.',
   icons: {
     icon:  '/anara-icon.svg',
     apple: '/anara-icon.svg',
   },
   openGraph: {
-    title:       'Anara Wallet',
+    title:       'Amara Wallet',
     description: 'AI-assisted wallet for Base and Ethereum with confirmation-based execution.',
     images:      ['/anara-logo.svg'],
   },

@@ -22,7 +22,7 @@ export default function NftDetailPage() {
     return (
       <div className="min-h-screen bg-earth text-cream">
         <KenteStrip height={4} />
-        <div className="max-w-xl mx-auto px-6 py-10">
+        <div className="mx-auto w-full max-w-6xl px-6 py-10">
           <Card kente>
             <div className="p-6">
               <div className="text-[10px] tracking-[0.2em] uppercase text-muted font-bold mb-3">NFT Not Found</div>
@@ -44,54 +44,67 @@ export default function NftDetailPage() {
   return (
     <div className="min-h-screen bg-earth text-cream">
       <KenteStrip height={4} />
-      <header className="sticky top-0 z-20 border-b border-border bg-soil/95 px-4 py-3 backdrop-blur">
-        <div className="max-w-3xl mx-auto flex items-center justify-between">
+      <header className="sticky top-0 z-20 border-b border-border bg-soil/95 px-4 py-3 backdrop-blur md:px-6 xl:px-8">
+        <div className="mx-auto flex w-full max-w-6xl items-center justify-between">
           <button onClick={() => router.back()} className="text-xs text-muted hover:text-cream">Back</button>
           <div className="text-[10px] uppercase tracking-[0.2em] text-muted font-bold">NFT Detail</div>
           <Link href="/dashboard" className="text-xs border border-border px-3 py-1.5 hover:border-border2">Close</Link>
         </div>
       </header>
 
-      <main className="max-w-3xl mx-auto px-4 py-6">
-        <Card kente>
-          <div className="p-6">
-            <div className="border border-border bg-clay overflow-hidden">
-              <div className="aspect-square bg-clay border-b border-border flex items-center justify-center overflow-hidden">
-                <NftArtwork nft={nft} />
-              </div>
-              <div className="p-4">
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <div className="text-2xl font-display font-black">{nft.name ?? `#${nft.tokenId}`}</div>
-                    <div className="text-sm text-muted mt-1">{nft.collection}</div>
-                  </div>
-                  <Badge variant="chain" color={nft.chain === 'ethereum' ? colors.chains.eth : colors.chains.base}>
-                    {nft.chain}
-                  </Badge>
+      <main className="mx-auto w-full max-w-6xl px-4 py-6 md:px-6 xl:px-8">
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1.05fr)_minmax(320px,0.95fr)] xl:items-start">
+          <Card kente>
+            <div className="p-6">
+              <div className="border border-border bg-clay overflow-hidden">
+                <div className="aspect-square bg-clay border-b border-border flex items-center justify-center overflow-hidden">
+                  <NftArtwork nft={nft} />
                 </div>
-
-                <div className="mt-6 space-y-3">
-                  <InfoRow label="Token ID" value={nft.tokenId} mono />
-                  <InfoRow label="Collection" value={nft.collection} />
-                  <InfoRow label="Chain" value={nft.chain} />
-                </div>
-
-                {nft.imageUrl && (
-                  <div className="mt-6">
-                    <a
-                      href={nft.imageUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="border border-border px-4 py-2 text-xs font-bold uppercase tracking-wide text-text2 hover:border-border2"
-                    >
-                      Open Artwork
-                    </a>
+                <div className="p-4">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <div className="text-2xl font-display font-black">{nft.name ?? `#${nft.tokenId}`}</div>
+                      <div className="text-sm text-muted mt-1">{nft.collection}</div>
+                    </div>
+                    <Badge variant="chain" color={nft.chain === 'ethereum' ? colors.chains.eth : colors.chains.base}>
+                      {nft.chain}
+                    </Badge>
                   </div>
-                )}
+
+                  <div className="mt-6 space-y-3">
+                    <InfoRow label="Token ID" value={nft.tokenId} mono />
+                    <InfoRow label="Collection" value={nft.collection} />
+                    <InfoRow label="Chain" value={nft.chain} />
+                  </div>
+                </div>
               </div>
             </div>
+          </Card>
+
+          <div className="space-y-4 xl:sticky xl:top-24">
+            {nft.imageUrl && (
+              <Card>
+                <div className="p-5">
+                  <div className="text-[10px] uppercase tracking-[0.2em] text-muted font-bold mb-3">Artwork</div>
+                  <a
+                    href={nft.imageUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="block border border-border px-4 py-3 text-xs font-bold uppercase tracking-wide text-text2 hover:border-border2"
+                  >
+                    Open Artwork
+                  </a>
+                </div>
+              </Card>
+            )}
+
+            <Card>
+              <div className="p-5 text-sm text-muted leading-6">
+                NFT detail uses the wallet snapshot currently loaded in the dashboard. Missing artwork falls back to the collection initials instead of a blank frame.
+              </div>
+            </Card>
           </div>
-        </Card>
+        </div>
       </main>
     </div>
   )

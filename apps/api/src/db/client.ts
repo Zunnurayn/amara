@@ -17,6 +17,9 @@ type AgentExecutionRow = {
   tx_hash?: string | null
   chain_id?: number | null
   profit_usd?: number | null
+  gas_cost_usd?: number | null
+  amount_usd?: number | null
+  error_message?: string | null
   executed_at: string
   metadata?: Record<string, unknown> | null
 }
@@ -340,6 +343,9 @@ export async function logExecution(data: {
     tx_hash: data.txHash ?? null,
     chain_id: data.chainId ?? null,
     profit_usd: data.profitUsd ?? null,
+    gas_cost_usd: data.gasCostUsd ?? null,
+    amount_usd: data.amountUsd ?? null,
+    error_message: data.errorMessage ?? null,
     executed_at: new Date().toISOString(),
     metadata: data.metadata ?? null,
   }
@@ -368,6 +374,27 @@ export async function getRecentExecutions(userId: string, sinceHours = 14) {
   return (memory.executions.get(userId) ?? []).filter(
     (execution) => new Date(execution.executed_at).getTime() >= cutoff
   )
+}
+
+export async function getStrategyExecutions(userId: string, strategyType: string, limit = 10) {
+  if (pool) {
+    const result = await query<AgentExecutionRow>(
+      `
+        select *
+        from agent_executions
+        where user_id = $1
+          and strategy_type = $2
+        order by executed_at desc
+        limit $3
+      `,
+      [userId, strategyType, limit]
+    )
+    return result?.rows ?? []
+  }
+
+  return (memory.executions.get(userId) ?? [])
+    .filter((execution) => execution.strategy_type === strategyType)
+    .slice(0, limit)
 }
 
 export async function saveTransaction(userId: string, tx: TransactionInsert) {

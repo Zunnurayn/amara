@@ -73,7 +73,7 @@ if (process.env.VITEST !== 'true' && process.env.NODE_ENV !== 'test') {
   app.listen(PORT, () => {
     console.log(`
 ╔═══════════════════════════════════╗
-║   Anara API  ·  port ${PORT}         ║
+║   Amara API  ·  port ${PORT}         ║
 ║   Agent: Claude claude-sonnet-4-5      ║
 ║   Chains: Base + 9 more          ║
 ╚═══════════════════════════════════╝

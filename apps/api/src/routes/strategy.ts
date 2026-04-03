@@ -2,6 +2,7 @@ import { Router } from 'express'
 import { z } from 'zod'
 import {
   getAgentSettings,
+  getStrategyExecutions,
   getUserByPrivyId,
   setStrategyEnabled,
   updateAgentSettings,
@@ -122,6 +123,7 @@ strategyRouter.get('/:id', async (req: AuthenticatedRequest, res) => {
     const yieldView = strategy.id === 'yield' && user.wallet_address
       ? await buildYieldStrategyView(user.wallet_address)
       : null
+    const history = await getStrategyExecutions(user.id, strategy.id, 10)
     const status = settings[strategyFieldMap[strategy.id]] === false
       ? 'paused'
       : rebalanceView?.status ?? yieldView?.status ?? strategy.defaultStatus
@@ -134,6 +136,18 @@ strategyRouter.get('/:id', async (req: AuthenticatedRequest, res) => {
       pnl: rebalanceView?.pnl ?? yieldView?.pnl ?? strategy.pnl,
       settings: serializeSettings(settings),
       details: rebalanceView?.details ?? yieldView?.details ?? strategyDetailCopy[strategy.id] ?? {},
+      history: history.map((entry) => ({
+        id: entry.id,
+        status: entry.status,
+        description: entry.description,
+        txHash: entry.tx_hash,
+        chainId: entry.chain_id,
+        executedAt: entry.executed_at,
+        amountUsd: entry.amount_usd,
+        profitUsd: entry.profit_usd,
+        gasCostUsd: entry.gas_cost_usd,
+        errorMessage: entry.error_message,
+      })),
     })
   } catch (err) {
     console.error('[strategy detail]', err)

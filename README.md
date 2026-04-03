@@ -1,13 +1,13 @@
-# Anara Wallet
+# Amara Wallet
 
 > Assistive web-first wallet for Base and Ethereum.
 > The agent prepares actions, you confirm execution.
 
 ---
 
-## What is Anara?
+## What is Amara?
 
-Anara is an AI-assisted crypto wallet focused on Base and Ethereum. The agent helps the user:
+Amara is an AI-assisted crypto wallet focused on Base and Ethereum. The agent helps the user:
 
 - view real balances, assets, NFTs, and wallet activity
 - ask for swap, send, and bridge previews in natural language

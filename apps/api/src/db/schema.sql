@@ -1,5 +1,5 @@
 -- ─────────────────────────────────────────────────────────────────
--- Anara Wallet — Database Schema
+-- Amara Wallet — Database Schema
 -- Supabase (PostgreSQL) with Row Level Security
 -- Run via: supabase db push  OR  psql -f schema.sql
 -- ─────────────────────────────────────────────────────────────────
