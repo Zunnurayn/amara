@@ -3,8 +3,9 @@
 // Fetches real token balances + prices via Alchemy SDK
 // ─────────────────────────────────────────────────────────────────
 
-const ALCHEMY_BASE_URL = `https://base-mainnet.g.alchemy.com/v2/${process.env.ALCHEMY_API_KEY}`
-const ALCHEMY_ETH_URL  = `https://eth-mainnet.g.alchemy.com/v2/${process.env.ALCHEMY_API_KEY}`
+const ALCHEMY_BASE_URL = resolveRpcUrl(process.env.BASE_RPC_URL, 'https://base-mainnet.g.alchemy.com/v2')
+const ALCHEMY_ETH_URL  = resolveRpcUrl(process.env.ETH_RPC_URL, 'https://eth-mainnet.g.alchemy.com/v2')
+const ALCHEMY_BSC_URL  = resolveRpcUrl(process.env.BSC_RPC_URL, 'https://bnb-mainnet.g.alchemy.com/v2')
 const COINGECKO_URL    = 'https://api.coingecko.com/api/v3'
 
 export interface TokenBalance {
@@ -38,6 +39,23 @@ function hasUsableAlchemyKey() {
   return Boolean(key && key !== 'xxxxxx')
 }
 
+function hasUsableRpcUrl(value?: string) {
+  const rpcUrl = value?.trim()
+  return Boolean(
+    rpcUrl &&
+    rpcUrl !== 'xxxxxx' &&
+    !rpcUrl.includes('${') &&
+    /^https?:\/\//.test(rpcUrl)
+  )
+}
+
+function resolveRpcUrl(explicitUrl: string | undefined, defaultBaseUrl: string) {
+  if (hasUsableRpcUrl(explicitUrl)) {
+    return explicitUrl!.trim()
+  }
+  return `${defaultBaseUrl}/${process.env.ALCHEMY_API_KEY}`
+}
+
 function formatProviderError(reason: unknown) {
   if (reason instanceof Error) return reason.message
   return String(reason)
@@ -61,9 +79,35 @@ function ensureRpcResult(data: any, label: string) {
   return data.result
 }
 
+function getRpcUrl(chainId: number) {
+  switch (chainId) {
+    case 1:
+      return ALCHEMY_ETH_URL
+    case 56:
+      return ALCHEMY_BSC_URL
+    case 8453:
+    default:
+      return ALCHEMY_BASE_URL
+  }
+}
+
+function getNftApiUrl(chainId: number) {
+  const key = process.env.ALCHEMY_API_KEY
+  if (!key) return null
+  switch (chainId) {
+    case 1:
+      return `https://eth-mainnet.g.alchemy.com/nft/v3/${key}`
+    case 56:
+      return `https://bnb-mainnet.g.alchemy.com/nft/v3/${key}`
+    case 8453:
+    default:
+      return `https://base-mainnet.g.alchemy.com/nft/v3/${key}`
+  }
+}
+
 // ── Get token balances (Alchemy) ──────────────────────────────────
 export async function getTokenBalances(address: string, chainId: number) {
-  const url = chainId === 8453 ? ALCHEMY_BASE_URL : ALCHEMY_ETH_URL
+  const url = getRpcUrl(chainId)
 
   const res = await fetch(url, {
     method:  'POST',
@@ -96,7 +140,7 @@ function formatUnits(value: bigint, decimals: number, precision = 6) {
 
 // ── Get token metadata ─────────────────────────────────────────────
 export async function getTokenMetadata(contractAddress: string, chainId: number) {
-  const url = chainId === 8453 ? ALCHEMY_BASE_URL : ALCHEMY_ETH_URL
+  const url = getRpcUrl(chainId)
 
   const res = await fetch(url, {
     method:  'POST',
@@ -115,7 +159,7 @@ export async function getTokenMetadata(contractAddress: string, chainId: number)
 
 // ── Get native ETH balance ─────────────────────────────────────────
 export async function getNativeBalance(address: string, chainId: number): Promise<string> {
-  const url = chainId === 8453 ? ALCHEMY_BASE_URL : ALCHEMY_ETH_URL
+  const url = getRpcUrl(chainId)
 
   const res = await fetch(url, {
     method:  'POST',
@@ -160,9 +204,10 @@ export async function getTokenPrices(symbols: string[]): Promise<Record<string, 
 
 // ── NFT balances (Alchemy NFT API) ────────────────────────────────
 export async function getNFTs(address: string, chainId: number) {
-  const url = chainId === 8453
-    ? `https://base-mainnet.g.alchemy.com/nft/v3/${process.env.ALCHEMY_API_KEY}`
-    : `https://eth-mainnet.g.alchemy.com/nft/v3/${process.env.ALCHEMY_API_KEY}`
+  const url = getNftApiUrl(chainId)
+  if (!url) {
+    throw new Error(`getNFTsForOwner(${chainId}): missing NFT API URL`)
+  }
 
   const res  = await fetch(`${url}/getNFTsForOwner?owner=${address}&withMetadata=true&pageSize=20`)
   const data = await parseJsonResponse(res)
@@ -175,21 +220,28 @@ export async function getNFTs(address: string, chainId: number) {
 
 // ── Full portfolio summary ─────────────────────────────────────────
 export async function buildPortfolio(address: string) {
+  const supportedChains = [8453, 1, 56] as const
+
   // Fetch in parallel
-  const [baseTokens, ethTokens, nativeBase, nativeEth, nftsBase, nftsEth] = await Promise.allSettled([
+  const [baseTokens, ethTokens, bscTokens, nativeBase, nativeEth, nativeBsc, nftsBase, nftsEth, nftsBsc] = await Promise.allSettled([
     getTokenBalances(address, 8453),
     getTokenBalances(address, 1),
+    getTokenBalances(address, 56),
     getNativeBalance(address, 8453),
     getNativeBalance(address, 1),
+    getNativeBalance(address, 56),
     getNFTs(address, 8453),
     getNFTs(address, 1),
+    getNFTs(address, 56),
   ])
 
   const balanceReadsFailed =
     baseTokens.status === 'rejected' &&
     ethTokens.status === 'rejected' &&
+    bscTokens.status === 'rejected' &&
     nativeBase.status === 'rejected' &&
-    nativeEth.status === 'rejected'
+    nativeEth.status === 'rejected' &&
+    nativeBsc.status === 'rejected'
   const warnings: string[] = []
 
   if (!hasUsableAlchemyKey()) {
@@ -203,10 +255,13 @@ export async function buildPortfolio(address: string) {
   const providerFailures = [
     { label: 'base token balances', result: baseTokens },
     { label: 'ethereum token balances', result: ethTokens },
+    { label: 'bnb token balances', result: bscTokens },
     { label: 'base native balance', result: nativeBase },
     { label: 'ethereum native balance', result: nativeEth },
+    { label: 'bnb native balance', result: nativeBsc },
     { label: 'base NFTs', result: nftsBase },
     { label: 'ethereum NFTs', result: nftsEth },
+    { label: 'bnb NFTs', result: nftsBsc },
   ].flatMap(({ label, result }) =>
     result.status === 'rejected'
       ? [`${label}: ${formatProviderError(result.reason)}`]
@@ -222,10 +277,14 @@ export async function buildPortfolio(address: string) {
   const ethTokenList = (ethTokens.status === 'fulfilled' ? ethTokens.value : [])
     .filter(t => isNonZero(t.tokenBalance))
     .slice(0, MAX_TOKENS_PER_CHAIN)
+  const bscTokenList = (bscTokens.status === 'fulfilled' ? bscTokens.value : [])
+    .filter(t => isNonZero(t.tokenBalance))
+    .slice(0, MAX_TOKENS_PER_CHAIN)
 
   const tokenEntries = [
     ...baseTokenList.map(t => ({ ...t, chainId: 8453 })),
     ...ethTokenList.map(t => ({ ...t, chainId: 1 })),
+    ...bscTokenList.map(t => ({ ...t, chainId: 56 })),
   ]
 
   const metadataList = await Promise.all(
@@ -240,10 +299,10 @@ export async function buildPortfolio(address: string) {
   )
 
   const symbols = Array.from(new Set(metadataList.map(t => t.meta?.symbol).filter(Boolean))) as string[]
-  const priceMap: Record<string, number> = await getTokenPrices(['ETH', ...symbols]).catch(() => ({}))
+  const priceMap: Record<string, number> = await getTokenPrices(['ETH', 'BNB', ...symbols]).catch(() => ({}))
 
   let totalUsdValue = 0
-  const chainTotals: Record<number, number> = { 8453: 0, 1: 0 }
+  const chainTotals: Record<number, number> = Object.fromEntries(supportedChains.map((chainId) => [chainId, 0])) as Record<number, number>
 
   const tokens: TokenSummary[] = metadataList
     .map(entry => {
@@ -270,16 +329,20 @@ export async function buildPortfolio(address: string) {
     })
     .filter(Boolean) as TokenSummary[]
 
-  // Add native ETH balances
+  // Add native balances
   const nativeBaseVal = nativeBase.status === 'fulfilled' ? nativeBase.value : '0'
   const nativeEthVal  = nativeEth.status === 'fulfilled'  ? nativeEth.value  : '0'
+  const nativeBscVal  = nativeBsc.status === 'fulfilled'  ? nativeBsc.value  : '0'
   const ethPrice      = priceMap.ETH ?? 0
+  const bnbPrice      = priceMap.BNB ?? 0
 
   const nativeBaseUsd = parseFloat(nativeBaseVal) * ethPrice
   const nativeEthUsd  = parseFloat(nativeEthVal)  * ethPrice
+  const nativeBscUsd  = parseFloat(nativeBscVal)  * bnbPrice
   if (nativeBaseUsd > 0) chainTotals[8453] = (chainTotals[8453] ?? 0) + nativeBaseUsd
   if (nativeEthUsd > 0)  chainTotals[1] = (chainTotals[1] ?? 0) + nativeEthUsd
-  totalUsdValue += nativeBaseUsd + nativeEthUsd
+  if (nativeBscUsd > 0)  chainTotals[56] = (chainTotals[56] ?? 0) + nativeBscUsd
+  totalUsdValue += nativeBaseUsd + nativeEthUsd + nativeBscUsd
 
   if (parseFloat(nativeBaseVal) > 0) {
     tokens.unshift({
@@ -299,6 +362,15 @@ export async function buildPortfolio(address: string) {
       chainId: 1,
     })
   }
+  if (parseFloat(nativeBscVal) > 0) {
+    tokens.unshift({
+      symbol: 'BNB',
+      name: 'BNB',
+      balance: nativeBscVal,
+      balanceUsd: `$${nativeBscUsd.toFixed(2)}`,
+      chainId: 56,
+    })
+  }
 
   const nfts: NftSummary[] = [
     ...(nftsBase.status === 'fulfilled' ? nftsBase.value : []).slice(0, 10).map((n: any) => ({
@@ -315,6 +387,13 @@ export async function buildPortfolio(address: string) {
       chain:      'ethereum',
       imageUrl:   n.media?.[0]?.gateway ?? n.media?.[0]?.raw ?? undefined,
     })),
+    ...(nftsBsc.status === 'fulfilled' ? nftsBsc.value : []).slice(0, 10).map((n: any) => ({
+      tokenId:    n.tokenId ?? '',
+      collection: n.contract?.name ?? 'Unknown Collection',
+      name:       n.title ?? n.tokenId ?? 'NFT',
+      chain:      'bsc',
+      imageUrl:   n.media?.[0]?.gateway ?? n.media?.[0]?.raw ?? undefined,
+    })),
   ]
 
   const change24h = '+$0.00'
@@ -324,6 +403,7 @@ export async function buildPortfolio(address: string) {
     chains: [
       { chainId: 8453, nativeBalance: nativeBaseVal, totalUsd: `$${(chainTotals[8453] ?? 0).toFixed(2)}` },
       { chainId: 1,    nativeBalance: nativeEthVal,  totalUsd: `$${(chainTotals[1] ?? 0).toFixed(2)}` },
+      { chainId: 56,   nativeBalance: nativeBscVal,  totalUsd: `$${(chainTotals[56] ?? 0).toFixed(2)}` },
     ],
     tokens,
     nfts,

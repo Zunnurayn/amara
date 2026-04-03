@@ -5,7 +5,7 @@ import { useRouter }   from 'next/navigation'
 import Link from 'next/link'
 import { getSwapQuote } from '@anara/chain'
 import { AnaraLogo, KenteStrip, Badge, Card, StatGrid, LiveDot, ActionCard, ChainLogo, TokenLogo } from '../../components/ui'
-import { colors, shadows } from '../../lib/ui-tokens'
+import { chainMeta, colors, shadows } from '../../lib/ui-tokens'
 import { useWalletStore, useAgentStore } from '../../store'
 import { useAgent } from '../../hooks/useAgent'
 import { track } from '../../lib/analytics'
@@ -29,6 +29,7 @@ export default function DashboardPage() {
   const emailAddress = user?.email?.address ?? null
   const profileLabel = user?.email?.address?.[0]?.toUpperCase() ?? 'S'
   const shortWallet = address ? `${address.slice(0, 6)}…${address.slice(-4)}` : null
+  const activeChainCount = Math.max(chains.filter((chain) => parseUsdAmount(chain.totalUsd) > 0).length, 1)
 
   useEffect(() => {
     if (ready && !authenticated) router.push('/onboard')
@@ -126,7 +127,7 @@ export default function DashboardPage() {
                     <ChainLogo chainId={chain.chainId} size={10} />
                   </span>
                 ))}
-                <span className="ml-1">{Math.max(chains.length, 1)} {chains.length === 1 ? 'chain' : 'chains'} ▾</span>
+                <span className="ml-1">{activeChainCount} {activeChainCount === 1 ? 'chain' : 'chains'} ▾</span>
               </button>
               {chainOpen && (
                 <>
@@ -217,6 +218,7 @@ export default function DashboardPage() {
             <PortfolioHero
               totalUsd={totalUsd}
               chains={chains}
+              activeChainCount={activeChainCount}
               tokenCount={tokens.length}
               nftCount={nfts.length}
               isRefreshing={isRefreshing || isLoading}
@@ -240,15 +242,16 @@ export default function DashboardPage() {
             </div>
 
             <div className="xl:hidden">
-              <WalletPanel
-                activeTab={activeTab}
-                onTabChange={setActiveTab}
-                transactions={transactions}
-                tokens={tokens}
-                nfts={nfts}
-                isLoading={isLoading}
-                error={error}
-              />
+            <WalletPanel
+              activeTab={activeTab}
+              onTabChange={setActiveTab}
+              transactions={transactions}
+              tokens={tokens}
+              nfts={nfts}
+              chains={chains}
+              isLoading={isLoading}
+              error={error}
+            />
             </div>
           </section>
 
@@ -289,6 +292,7 @@ export default function DashboardPage() {
             transactions={transactions}
             tokens={tokens}
             nfts={nfts}
+            chains={chains}
             isLoading={isLoading}
             error={error}
           />
@@ -763,10 +767,13 @@ const quickInputClassName = 'w-full border border-border bg-clay px-3 py-3 text-
 function buildTokenOptions(tokens: TokenBalance[]) {
   const seen = new Set<string>()
   const options = tokens
-    .filter((token) => parseUsdAmount(token.balanceUsd) > 0 || parseFloat(token.balanceFormatted || '0') > 0)
+      .filter((token) =>
+        (token.chainId === 1 || token.chainId === 8453) &&
+        (parseUsdAmount(token.balanceUsd) > 0 || parseFloat(token.balanceFormatted || '0') > 0)
+      )
     .map((token) => ({
       symbol: token.symbol,
-      chain: token.chainId === 1 ? 'Ethereum' : 'Base',
+      chain: chainMeta[token.chainId]?.name === 'Ethereum' ? 'Ethereum' : 'Base',
     }))
     .filter((token) => {
       const key = `${token.symbol}:${token.chain}`
@@ -1214,6 +1221,7 @@ function BriefModal({ brief, onDismiss }: { brief: Brief; onDismiss: () => void 
 function PortfolioHero({
   totalUsd,
   chains,
+  activeChainCount,
   tokenCount,
   nftCount,
   isRefreshing,
@@ -1221,6 +1229,7 @@ function PortfolioHero({
 }: {
   totalUsd: string
   chains: WalletChainSummary[]
+  activeChainCount: number
   tokenCount: number
   nftCount: number
   isRefreshing: boolean
@@ -1232,6 +1241,9 @@ function PortfolioHero({
   const [pendingAction, setPendingAction] = useState<'send' | 'receive' | 'swap' | 'bridge' | null>(null)
   const chainBreakdown = chains.filter((chain) => parseUsdAmount(chain.totalUsd) > 0)
   const totalValue = Math.max(parseUsdAmount(totalUsd), 0.01)
+  const summaryChains = [...chains]
+    .sort((left, right) => parseUsdAmount(right.totalUsd) - parseUsdAmount(left.totalUsd))
+    .slice(0, 2)
   return (
     <Card kente className="shadow-[0_18px_40px_rgba(0,0,0,0.18)]">
       <div className="p-4">
@@ -1253,8 +1265,8 @@ function PortfolioHero({
           <span className="text-2xl text-muted font-bold">.{totalUsd.split('.')[1] ?? '00'}</span>
         </div>
         <div className="flex items-center gap-2 mt-2.5">
-          <span className="bg-clay border border-border text-text2 text-[10px] font-bold font-mono px-2.5 py-1">
-            {chains.length} active {chains.length === 1 ? 'chain' : 'chains'}
+            <span className="bg-clay border border-border text-text2 text-[10px] font-bold font-mono px-2.5 py-1">
+            {activeChainCount} active {activeChainCount === 1 ? 'chain' : 'chains'}
           </span>
           <span className="text-[10px] text-muted">{tokenCount} tokens · {nftCount} NFTs</span>
         </div>
@@ -1263,10 +1275,14 @@ function PortfolioHero({
       {/* Stats row */}
       <div className="grid grid-cols-3 border-t border-border">
         {[
-          { label: 'Base',      value: formatChainTotal(chains, 8453),  color: colors.chains.base, chainId: 8453 },
-          { label: 'Ethereum',  value: formatChainTotal(chains, 1),     color: colors.chains.eth, chainId: 1 },
+          ...summaryChains.map((chain) => ({
+            label: chainMeta[chain.chainId]?.name ?? `Chain ${chain.chainId}`,
+            value: chain.totalUsd,
+            color: chainMeta[chain.chainId]?.color ?? colors.gold2,
+            chainId: chain.chainId,
+          })),
           { label: 'Assets',    value: String(tokenCount + nftCount),   color: colors.gold2       },
-        ].map((s, i) => (
+        ].slice(0, 3).map((s, i) => (
           <div key={s.label} className={`flex-1 p-3 ${i < 2 ? 'border-r border-border' : ''}`}>
             <div className="flex items-center gap-2">
               {'chainId' in s && s.chainId ? <ChainLogo chainId={s.chainId} size={16} /> : null}
@@ -1314,7 +1330,7 @@ function PortfolioHero({
             className="flex-1"
             style={{
               flex: parseUsdAmount(chain.totalUsd) / totalValue,
-              background: chain.chainId === 1 ? colors.chains.eth : colors.chains.base,
+              background: chainMeta[chain.chainId]?.color ?? colors.chains.base,
             }}
           />
         )) : (
@@ -1387,11 +1403,11 @@ function ActivityTab({ transactions, isLoading, error }: { transactions: any[]; 
           <div className="flex-1">
             <div className="text-[12px] text-cream">{formatActivityLabel(item)}</div>
             <div className="mt-1 flex items-center gap-1.5 text-[10px] text-muted font-mono">
-              <ChainLogo chainId={item.chainId === 1 ? 1 : 8453} size={12} />
+              <ChainLogo chainId={item.chainId} size={12} />
               <span>
               {item.hash ? `${item.hash.slice(0, 10)}…${item.hash.slice(-4)}` : 'Pending hash'}
               {' · '}
-              {item.chainId === 1 ? 'Ethereum' : 'Base'}
+              {chainMeta[item.chainId]?.name ?? `Chain ${item.chainId}`}
               </span>
             </div>
             <div className="flex gap-2 mt-1 items-center">
@@ -1406,34 +1422,54 @@ function ActivityTab({ transactions, isLoading, error }: { transactions: any[]; 
   )
 }
 
-function AssetsTab({ tokens }: { tokens: any[] }) {
+function AssetsTab({
+  tokens,
+  selectedChain,
+  availableChainIds,
+}: {
+  tokens: TokenBalance[]
+  selectedChain: number | 'all'
+  availableChainIds: number[]
+}) {
   const router = useRouter()
-  if (!tokens.length) return <EmptyTabState message="No token balances found for this wallet yet." />
-  const assets = [...tokens]
-    .sort((a: any, b: any) => parseUsdAmount(b.balanceUsd) - parseUsdAmount(a.balanceUsd))
-    .map((token: any) => ({
-    address: token.address,
-    chainId: token.chainId,
-    symbol: token.symbol,
-    logoUrl: token.logoUrl,
-    amount: token.balanceFormatted,
-    value: token.balanceUsd,
-    name: token.name,
-    chain: token.chainId === 1 ? 'ETH' : 'BASE',
-    color: token.chainId === 1 ? colors.chains.eth : colors.chains.base,
-  }))
+  const [showHidden, setShowHidden] = useState(false)
+  const scopeChainIds = selectedChain === 'all' ? availableChainIds : [selectedChain]
+  const mergedAssets = buildAssetRows(tokens, scopeChainIds)
+  const visibleAssets = mergedAssets.filter((asset) => showHidden || !asset.hidden)
+  const hiddenCount = mergedAssets.filter((asset) => asset.hidden).length
+
+  if (!mergedAssets.length) return <EmptyTabState message="No token balances found for this wallet yet." />
+
   return (
     <div>
-      {assets.map((a: any, i: number) => (
+      <div className="flex items-center justify-between gap-3 border-b border-border/50 px-4 py-2.5">
+        <div className="text-[10px] uppercase tracking-[0.18em] text-muted font-bold">
+          {selectedChain === 'all'
+            ? 'Verified assets across active chains'
+            : `${chainMeta[selectedChain]?.name ?? 'Selected chain'} assets`}
+        </div>
+        {hiddenCount > 0 && (
+          <button
+            onClick={() => setShowHidden((current) => !current)}
+            className="text-[10px] font-bold uppercase tracking-[0.16em] text-gold2 hover:text-gold"
+          >
+            {showHidden ? 'Hide low-value' : `Show hidden (${hiddenCount})`}
+          </button>
+        )}
+      </div>
+      {visibleAssets.map((a, i) => (
         <button
-          key={i}
+          key={`${a.chainId}:${a.address}:${i}`}
           onClick={() => router.push(`/dashboard/assets/${a.chainId}/${encodeURIComponent(a.address)}`)}
           className="w-full flex items-center justify-between px-4 py-3 border-b border-border/50 last:border-b-0 hover:bg-clay/30 transition-colors cursor-pointer text-left"
         >
           <div className="flex items-center gap-3">
             <TokenLogo symbol={a.symbol} name={a.name} logoUrl={a.logoUrl} chainId={a.chainId} size={32} />
             <div>
-              <div className="text-[13px] font-bold">{a.symbol}</div>
+              <div className="flex items-center gap-2">
+                <div className="text-[13px] font-bold">{a.symbol}</div>
+                {a.verified && <Badge variant="active">Verified</Badge>}
+              </div>
               <div className="text-[10px] text-muted">{a.name}</div>
               <span className="mt-1 inline-flex items-center gap-1 text-[8px] text-muted bg-clay border border-border px-1.5 py-0.5 font-mono">
                 <ChainLogo chainId={a.chainId} size={10} />
@@ -1472,7 +1508,7 @@ function NFTsTab({ nfts, isLoading, error }: { nfts: WalletNftSummary[]; isLoadi
             <div className="text-[11px] font-bold text-text2 truncate">{nft.name ?? `#${nft.tokenId}`}</div>
             <div className="text-[10px] text-muted truncate mt-1">{nft.collection}</div>
             <div className="mt-2">
-              <Badge variant="chain" color={nft.chain === 'ethereum' ? colors.chains.eth : colors.chains.base}>
+              <Badge variant="chain" color={getNftChainColor(nft.chain)}>
                 {nft.chain}
               </Badge>
             </div>
@@ -1493,6 +1529,7 @@ function WalletPanel({
   transactions,
   tokens,
   nfts,
+  chains,
   isLoading,
   error,
 }: {
@@ -1501,9 +1538,34 @@ function WalletPanel({
   transactions: any[]
   tokens: TokenBalance[]
   nfts: WalletNftSummary[]
+  chains: WalletChainSummary[]
   isLoading: boolean
   error: string | null
 }) {
+  const [selectedChain, setSelectedChain] = useState<number | 'all'>('all')
+  const availableChainIds = chains
+    .map((chain) => chain.chainId)
+    .filter((chainId, index, list) => list.indexOf(chainId) === index)
+    .sort((left, right) => {
+      if (left === 8453) return -1
+      if (right === 8453) return 1
+      if (left === 1) return -1
+      if (right === 1) return 1
+      return left - right
+    })
+
+  const filteredTransactions = selectedChain === 'all'
+    ? transactions
+    : transactions.filter((item) => item.chainId === selectedChain)
+
+  const filteredTokens = selectedChain === 'all'
+    ? tokens
+    : tokens.filter((token) => token.chainId === selectedChain)
+
+  const filteredNfts = selectedChain === 'all'
+    ? nfts
+    : nfts.filter((nft) => getChainIdFromNftChain(nft.chain) === selectedChain)
+
   return (
     <section>
       <div className="text-[9px] font-bold tracking-[0.2em] text-muted uppercase mb-3">Wallet</div>
@@ -1524,10 +1586,37 @@ function WalletPanel({
           ))}
         </div>
 
+        <div className="sticky top-[41px] z-[9] flex flex-wrap gap-2 border-b border-border bg-soil/95 px-3 py-2 backdrop-blur">
+          <button
+            onClick={() => setSelectedChain('all')}
+            className={`border px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.16em] transition-colors ${
+              selectedChain === 'all'
+                ? 'border-gold/40 bg-gold/10 text-gold2'
+                : 'border-border bg-clay text-text2 hover:border-border2'
+            }`}
+          >
+            All
+          </button>
+          {availableChainIds.map((chainId) => (
+            <button
+              key={chainId}
+              onClick={() => setSelectedChain(chainId)}
+              className={`inline-flex items-center gap-1.5 border px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.16em] transition-colors ${
+                selectedChain === chainId
+                  ? 'border-gold/40 bg-gold/10 text-gold2'
+                  : 'border-border bg-clay text-text2 hover:border-border2'
+              }`}
+            >
+              <ChainLogo chainId={chainId} size={12} />
+              {chainMeta[chainId]?.shortName ?? chainId}
+            </button>
+          ))}
+        </div>
+
         <div className="min-h-[200px] max-h-[26rem] overflow-y-auto overscroll-contain md:max-h-[34rem] xl:max-h-[44rem]">
-          {activeTab === 'activity' && <ActivityTab transactions={transactions} isLoading={isLoading} error={error} />}
-          {activeTab === 'assets'   && <AssetsTab tokens={tokens} />}
-          {activeTab === 'nfts'     && <NFTsTab nfts={nfts} isLoading={isLoading} error={error} />}
+          {activeTab === 'activity' && <ActivityTab transactions={filteredTransactions} isLoading={isLoading} error={error} />}
+          {activeTab === 'assets'   && <AssetsTab tokens={filteredTokens} selectedChain={selectedChain} availableChainIds={availableChainIds} />}
+          {activeTab === 'nfts'     && <NFTsTab nfts={filteredNfts} isLoading={isLoading} error={error} />}
         </div>
       </Card>
     </section>
@@ -1604,6 +1693,99 @@ function parseUsdAmount(value?: string) {
   return Number.parseFloat(value.replace(/[$,]/g, '')) || 0
 }
 
+const VERIFIED_ASSETS: Record<number, Array<{
+  address: `0x${string}` | 'native'
+  symbol: string
+  name: string
+  decimals: number
+  logoUrl?: string
+}>> = {
+  8453: [
+    { address: 'native', symbol: 'ETH', name: 'Ether', decimals: 18 },
+    { address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', symbol: 'USDC', name: 'USD Coin', decimals: 6 },
+  ],
+  1: [
+    { address: 'native', symbol: 'ETH', name: 'Ether', decimals: 18 },
+    { address: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', symbol: 'USDC', name: 'USD Coin', decimals: 6 },
+  ],
+  56: [
+    { address: 'native', symbol: 'BNB', name: 'BNB', decimals: 18 },
+    { address: '0x55d398326f99059fF775485246999027B3197955', symbol: 'USDT', name: 'Tether USD', decimals: 18 },
+  ],
+}
+
+function buildAssetRows(tokens: TokenBalance[], chainIds: number[]) {
+  const rows = new Map<string, {
+    address: `0x${string}` | 'native'
+    chainId: number
+    symbol: string
+    logoUrl?: string
+    amount: string
+    value: string
+    name: string
+    chain: string
+    color: string
+    verified: boolean
+    hidden: boolean
+  }>()
+
+  for (const token of tokens) {
+    const key = `${token.chainId}:${normalizeAssetAddress(token.address)}`
+    rows.set(key, {
+      address: token.address,
+      chainId: token.chainId,
+      symbol: token.symbol,
+      logoUrl: token.logoUrl,
+      amount: token.balanceFormatted,
+      value: token.balanceUsd,
+      name: token.name,
+      chain: chainMeta[token.chainId]?.shortName ?? `CHAIN ${token.chainId}`,
+      color: chainMeta[token.chainId]?.color ?? colors.chains.base,
+      verified: isVerifiedAsset(token.chainId, token.address),
+      hidden: !isVerifiedAsset(token.chainId, token.address) && parseUsdAmount(token.balanceUsd) <= 0,
+    })
+  }
+
+  for (const chainId of chainIds) {
+    for (const asset of VERIFIED_ASSETS[chainId] ?? []) {
+      const key = `${chainId}:${normalizeAssetAddress(asset.address)}`
+      if (rows.has(key)) {
+        const existing = rows.get(key)!
+        rows.set(key, { ...existing, verified: true, hidden: false })
+        continue
+      }
+      rows.set(key, {
+        address: asset.address,
+        chainId,
+        symbol: asset.symbol,
+        logoUrl: asset.logoUrl,
+        amount: '0',
+        value: '$0.00',
+        name: asset.name,
+        chain: chainMeta[chainId]?.shortName ?? `CHAIN ${chainId}`,
+        color: chainMeta[chainId]?.color ?? colors.chains.base,
+        verified: true,
+        hidden: false,
+      })
+    }
+  }
+
+  return Array.from(rows.values()).sort((left, right) => {
+    const usdDiff = parseUsdAmount(right.value) - parseUsdAmount(left.value)
+    if (usdDiff !== 0) return usdDiff
+    if (left.verified !== right.verified) return left.verified ? -1 : 1
+    return left.symbol.localeCompare(right.symbol)
+  })
+}
+
+function isVerifiedAsset(chainId: number, address: `0x${string}` | 'native') {
+  return (VERIFIED_ASSETS[chainId] ?? []).some((asset) => normalizeAssetAddress(asset.address) === normalizeAssetAddress(address))
+}
+
+function normalizeAssetAddress(address: `0x${string}` | 'native') {
+  return address === 'native' ? 'native' : address.toLowerCase()
+}
+
 function formatActivityLabel(item: any) {
   if (item.type === 'contract') {
     const raw = String(item.valueFormatted ?? '').trim()
@@ -1643,7 +1825,7 @@ function NftArtwork({ nft }: { nft: WalletNftSummary }) {
       className="flex h-full w-full items-center justify-center text-[1.4rem] font-display font-black tracking-[0.18em]"
       style={{
         background: `linear-gradient(135deg, ${colors.clay2} 0%, ${colors.earth} 100%)`,
-        color: nft.chain === 'ethereum' ? colors.chains.eth : colors.chains.base,
+        color: getNftChainColor(nft.chain),
       }}
     >
       {initials}
@@ -1655,13 +1837,14 @@ function ChainMenu() {
   const chains = [
     { name: 'Base',      sub: 'L2 · Coinbase', color: colors.chains.base,  active: true  },
     { name: 'Ethereum',  sub: 'L1 · Mainnet',  color: colors.chains.eth,   active: true  },
+    { name: 'BNB Chain', sub: 'L1 · Wallet View', color: colors.chains.bnb, active: true },
   ]
   return (
     <div className="absolute top-full right-0 mt-1.5 w-56 bg-soil border border-border z-20 shadow-dark">
       <div className="text-[9px] font-bold tracking-[0.16em] text-muted uppercase px-3 py-2.5 border-b border-border">Connected Networks</div>
       {chains.map(c => (
         <div key={c.name} className="flex items-center gap-3 px-3 py-2.5 border-b border-border/50 last:border-b-0 hover:bg-clay transition-colors cursor-pointer">
-          <ChainLogo chainId={c.name === 'Ethereum' ? 1 : 8453} size={16} />
+          <ChainLogo chainId={c.name === 'Ethereum' ? 1 : c.name === 'BNB Chain' ? 56 : 8453} size={16} />
           <div className="flex-1">
             <div className="text-[12px] font-bold">{c.name}</div>
             <div className="text-[9px] text-muted">{c.sub}</div>
@@ -1671,4 +1854,16 @@ function ChainMenu() {
       ))}
     </div>
   )
+}
+
+function getNftChainColor(chain: string) {
+  if (chain === 'ethereum') return colors.chains.eth
+  if (chain === 'bsc') return colors.chains.bnb
+  return colors.chains.base
+}
+
+function getChainIdFromNftChain(chain: string) {
+  if (chain === 'ethereum') return 1
+  if (chain === 'bsc') return 56
+  return 8453
 }

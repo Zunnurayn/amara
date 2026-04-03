@@ -7,6 +7,28 @@ import { Badge, Card, KenteStrip, ChainLogo, TokenLogo } from '../../../../../co
 import { useWalletStore } from '../../../../../store'
 import { chainMeta } from '../../../../../lib/ui-tokens'
 
+const VERIFIED_ASSETS: Record<number, Array<{
+  address: `0x${string}` | 'native'
+  symbol: string
+  name: string
+  decimals: number
+  priceUsd: string
+  change24h: string
+}>> = {
+  8453: [
+    { address: 'native', symbol: 'ETH', name: 'Ether', decimals: 18, priceUsd: '$0.00', change24h: '+0.00%' },
+    { address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', symbol: 'USDC', name: 'USD Coin', decimals: 6, priceUsd: '$1.00', change24h: '+0.00%' },
+  ],
+  1: [
+    { address: 'native', symbol: 'ETH', name: 'Ether', decimals: 18, priceUsd: '$0.00', change24h: '+0.00%' },
+    { address: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', symbol: 'USDC', name: 'USD Coin', decimals: 6, priceUsd: '$1.00', change24h: '+0.00%' },
+  ],
+  56: [
+    { address: 'native', symbol: 'BNB', name: 'BNB', decimals: 18, priceUsd: '$0.00', change24h: '+0.00%' },
+    { address: '0x55d398326f99059fF775485246999027B3197955', symbol: 'USDT', name: 'Tether USD', decimals: 18, priceUsd: '$1.00', change24h: '+0.00%' },
+  ],
+}
+
 export default function AssetDetailPage() {
   const router = useRouter()
   const params = useParams<{ chainId: string; address: string }>()
@@ -15,7 +37,18 @@ export default function AssetDetailPage() {
   const asset = useMemo(() => {
     const chainId = Number(params.chainId)
     const address = decodeURIComponent(params.address)
-    return tokens.find((token) => token.chainId === chainId && token.address === address) ?? null
+    const liveToken = tokens.find((token) => token.chainId === chainId && token.address === address)
+    if (liveToken) return liveToken
+    const fallback = (VERIFIED_ASSETS[chainId] ?? []).find((token) => normalizeAssetAddress(token.address) === normalizeAssetAddress(address as `0x${string}` | 'native'))
+    if (!fallback) return null
+    return {
+      ...fallback,
+      balance: '0',
+      balanceFormatted: '0',
+      balanceUsd: '$0.00',
+      logoUrl: undefined,
+      chainId,
+    }
   }, [params.address, params.chainId, tokens])
 
   if (!asset) {
@@ -132,6 +165,10 @@ export default function AssetDetailPage() {
       </main>
     </div>
   )
+}
+
+function normalizeAssetAddress(address: `0x${string}` | 'native') {
+  return address === 'native' ? 'native' : address.toLowerCase()
 }
 
 function MetricCard({ label, value }: { label: string; value: string }) {

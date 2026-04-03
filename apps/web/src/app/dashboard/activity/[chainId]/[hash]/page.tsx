@@ -62,7 +62,7 @@ export default function ActivityDetailPage() {
               <div className="flex items-start justify-between gap-4">
                 <div className="flex items-start gap-3">
                   <TokenLogo
-                    symbol={transaction.tokenOut?.symbol ?? transaction.tokenIn?.symbol ?? (transaction.chainId === 1 ? 'ETH' : 'BASE')}
+                    symbol={transaction.tokenOut?.symbol ?? transaction.tokenIn?.symbol ?? (transaction.chainId === 56 ? 'BNB' : transaction.chainId === 1 ? 'ETH' : 'BASE')}
                     name={transaction.tokenOut?.symbol ?? transaction.tokenIn?.symbol ?? 'Wallet Activity'}
                     chainId={transaction.chainId}
                     size={44}

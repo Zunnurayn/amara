@@ -659,7 +659,10 @@ const quickInputClassName = 'w-full border border-border bg-clay px-3 py-3 text-
 function buildTokenOptions(tokens: TokenBalance[]) {
   const seen = new Set<string>()
   const options = tokens
-    .filter((token) => parseUsdAmount(token.balanceUsd) > 0 || parseFloat(token.balanceFormatted || '0') > 0)
+    .filter((token) =>
+      (token.chainId === 1 || token.chainId === 8453) &&
+      (parseUsdAmount(token.balanceUsd) > 0 || parseFloat(token.balanceFormatted || '0') > 0)
+    )
     .map((token) => ({
       symbol: token.symbol,
       chain: token.chainId === 1 ? 'Ethereum' : 'Base',

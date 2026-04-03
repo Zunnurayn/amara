@@ -182,6 +182,25 @@ export function ChainLogo({
     )
   }
 
+  if (chainId === 56) {
+    return (
+      <div
+        className={cn('flex items-center justify-center overflow-hidden rounded-full border border-border/40 bg-[#F3BA2F]/12', className)}
+        style={{ width: size, height: size }}
+      >
+        <svg width={Math.round(size * 0.8)} height={Math.round(size * 0.8)} viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <path d="M32 8L38.2 14.2L26.5 25.9L20.3 19.7L32 8Z" fill="#F3BA2F"/>
+          <path d="M43.7 19.7L49.9 25.9L38.2 37.6L32 31.4L43.7 19.7Z" fill="#F3BA2F"/>
+          <path d="M20.3 19.7L32 31.4L25.8 37.6L14.1 25.9L20.3 19.7Z" fill="#F3BA2F"/>
+          <path d="M32 31.4L38.2 37.6L32 43.8L25.8 37.6L32 31.4Z" fill="#F3BA2F"/>
+          <path d="M26.5 39.3L32.7 45.5L32 46.2L31.3 45.5L25.1 39.3L26.5 39.3Z" fill="#F3BA2F"/>
+          <path d="M38.2 39.3L39.6 39.3L33.4 45.5L32.7 46.2L32 45.5L38.2 39.3Z" fill="#F3BA2F"/>
+          <path d="M32 55.4L20.3 43.7L26.5 37.5L32 43L37.5 37.5L43.7 43.7L32 55.4Z" fill="#F3BA2F"/>
+        </svg>
+      </div>
+    )
+  }
+
   return (
     <div
       className={cn('flex items-center justify-center overflow-hidden rounded-[22%] border border-border/40 bg-white', className)}
@@ -237,14 +256,20 @@ export function TokenLogo({
       style={{
         width: size,
         height: size,
-        background: `linear-gradient(135deg, ${(chainId === 1 ? colors.chains.eth : colors.chains.base)}22 0%, ${colors.clay2} 100%)`,
-        color: chainId === 1 ? colors.chains.eth : colors.chains.base,
+        background: `linear-gradient(135deg, ${getTokenFallbackColor(chainId)}22 0%, ${colors.clay2} 100%)`,
+        color: getTokenFallbackColor(chainId),
         fontSize: Math.max(10, Math.round(size * 0.32)),
       }}
     >
       {initials}
     </div>
   )
+}
+
+function getTokenFallbackColor(chainId?: number) {
+  if (chainId === 1) return colors.chains.eth
+  if (chainId === 56) return colors.chains.bnb
+  return colors.chains.base
 }
 
 export function Card({

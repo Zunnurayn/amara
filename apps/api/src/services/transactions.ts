@@ -3,9 +3,11 @@
 // Fetches recent transfers via Alchemy JSON-RPC
 // ─────────────────────────────────────────────────────────────────
 
-const ALCHEMY_BASE_URL = `https://base-mainnet.g.alchemy.com/v2/${process.env.ALCHEMY_API_KEY}`
-const ALCHEMY_ETH_URL  = `https://eth-mainnet.g.alchemy.com/v2/${process.env.ALCHEMY_API_KEY}`
+const ALCHEMY_BASE_URL = resolveRpcUrl(process.env.BASE_RPC_URL, 'https://base-mainnet.g.alchemy.com/v2')
+const ALCHEMY_ETH_URL  = resolveRpcUrl(process.env.ETH_RPC_URL, 'https://eth-mainnet.g.alchemy.com/v2')
+const ALCHEMY_BSC_URL  = resolveRpcUrl(process.env.BSC_RPC_URL, 'https://bnb-mainnet.g.alchemy.com/v2')
 const ETHERSCAN_V2_API_URL = 'https://api.etherscan.io/v2/api'
+const BSCSCAN_API_URL = 'https://api.bscscan.com/api'
 
 type TransferDirection = 'from' | 'to'
 
@@ -82,7 +84,15 @@ interface ExplorerTokenTxRecord {
 }
 
 function getAlchemyUrl(chainId: number) {
-  return chainId === 8453 ? ALCHEMY_BASE_URL : ALCHEMY_ETH_URL
+  switch (chainId) {
+    case 1:
+      return ALCHEMY_ETH_URL
+    case 56:
+      return ALCHEMY_BSC_URL
+    case 8453:
+    default:
+      return ALCHEMY_BASE_URL
+  }
 }
 
 function toHexCount(n: number) {
@@ -106,8 +116,27 @@ function hasUsableApiKey(value?: string) {
   return Boolean(key && key !== 'xxxxxx')
 }
 
+function hasUsableRpcUrl(value?: string) {
+  const rpcUrl = value?.trim()
+  return Boolean(
+    rpcUrl &&
+    rpcUrl !== 'xxxxxx' &&
+    !rpcUrl.includes('${') &&
+    /^https?:\/\//.test(rpcUrl)
+  )
+}
+
+function resolveRpcUrl(explicitUrl: string | undefined, defaultBaseUrl: string) {
+  if (hasUsableRpcUrl(explicitUrl)) {
+    return explicitUrl!.trim()
+  }
+  return `${defaultBaseUrl}/${process.env.ALCHEMY_API_KEY}`
+}
+
 function shouldUseExplorerFallback(chainId: number) {
-  return chainId === 1 && hasUsableApiKey(process.env.ETHERSCAN_API_KEY)
+  if (chainId === 1) return hasUsableApiKey(process.env.ETHERSCAN_API_KEY)
+  if (chainId === 56) return hasUsableApiKey(process.env.BSCSCAN_API_KEY)
+  return false
 }
 
 async function fetchTransfers(address: string, chainId: number, direction: TransferDirection, limit: number) {
@@ -307,22 +336,7 @@ async function fetchExplorerTransactions(address: string, chainId: number, limit
 }
 
 async function fetchExplorerNormalTransactions(address: string, chainId: number, limit: number): Promise<TransactionSummary[]> {
-  const apiUrl = ETHERSCAN_V2_API_URL
-  const apiKey = chainId === 8453 ? process.env.BASESCAN_API_KEY : process.env.ETHERSCAN_API_KEY
-  const params = new URLSearchParams({
-    chainid: String(chainId),
-    module: 'account',
-    action: 'txlist',
-    address,
-    page: '1',
-    offset: String(limit),
-    sort: 'desc',
-  })
-
-  if (hasUsableApiKey(apiKey)) {
-    params.set('apikey', apiKey!)
-  }
-
+  const { apiUrl, params } = buildExplorerParams(chainId, address, limit, 'txlist')
   const response = await fetch(`${apiUrl}?${params.toString()}`)
   const data = await parseJsonResponse(response) as {
     status?: string
@@ -350,7 +364,7 @@ async function fetchExplorerNormalTransactions(address: string, chainId: number,
       from: record.from as `0x${string}`,
       to: record.to as `0x${string}` | undefined,
       value: String(valueEth),
-      valueFormatted: formatExplorerValue(record, valueEth, isContract),
+      valueFormatted: formatExplorerValue(record, valueEth, isContract, chainId),
       timestamp: Number(record.timeStamp) * 1000,
       blockNumber: Number(record.blockNumber),
       nonce: Number(record.nonce),
@@ -359,22 +373,7 @@ async function fetchExplorerNormalTransactions(address: string, chainId: number,
 }
 
 async function fetchExplorerTokenTransactions(address: string, chainId: number, limit: number): Promise<TransactionSummary[]> {
-  const apiUrl = ETHERSCAN_V2_API_URL
-  const apiKey = chainId === 8453 ? process.env.BASESCAN_API_KEY : process.env.ETHERSCAN_API_KEY
-  const params = new URLSearchParams({
-    chainid: String(chainId),
-    module: 'account',
-    action: 'tokentx',
-    address,
-    page: '1',
-    offset: String(limit),
-    sort: 'desc',
-  })
-
-  if (hasUsableApiKey(apiKey)) {
-    params.set('apikey', apiKey!)
-  }
-
+  const { apiUrl, params } = buildExplorerParams(chainId, address, limit, 'tokentx')
   const response = await fetch(`${apiUrl}?${params.toString()}`)
   const data = await parseJsonResponse(response) as {
     status?: string
@@ -447,11 +446,11 @@ function mergeExplorerTransactions(
     .slice(0, limit)
 }
 
-function formatExplorerValue(record: ExplorerTxRecord, valueEth: number, isContract: boolean) {
+function formatExplorerValue(record: ExplorerTxRecord, valueEth: number, isContract: boolean, chainId: number) {
   if (isContract) {
     return record.functionName?.trim() || 'Contract interaction'
   }
-  return valueEth > 0 ? `${valueEth} ETH` : 'Wallet activity'
+  return valueEth > 0 ? `${valueEth} ${chainId === 56 ? 'BNB' : 'ETH'}` : 'Wallet activity'
 }
 
 function formatTokenUnits(value: string, decimals: number, precision = 6) {
@@ -465,6 +464,51 @@ function formatTokenUnits(value: string, decimals: number, precision = 6) {
 
 function formatReason(reason: unknown) {
   return reason instanceof Error ? reason.message : String(reason)
+}
+
+function buildExplorerParams(
+  chainId: number,
+  address: string,
+  limit: number,
+  action: 'txlist' | 'tokentx'
+) {
+  if (chainId === 56) {
+    const params = new URLSearchParams({
+      module: 'account',
+      action,
+      address,
+      page: '1',
+      offset: String(limit),
+      sort: 'desc',
+    })
+    if (hasUsableApiKey(process.env.BSCSCAN_API_KEY)) {
+      params.set('apikey', process.env.BSCSCAN_API_KEY!)
+    }
+    return {
+      apiUrl: BSCSCAN_API_URL,
+      apiKey: process.env.BSCSCAN_API_KEY,
+      params,
+    }
+  }
+
+  const apiKey = chainId === 8453 ? process.env.BASESCAN_API_KEY : process.env.ETHERSCAN_API_KEY
+  const params = new URLSearchParams({
+    chainid: String(chainId),
+    module: 'account',
+    action,
+    address,
+    page: '1',
+    offset: String(limit),
+    sort: 'desc',
+  })
+  if (hasUsableApiKey(apiKey)) {
+    params.set('apikey', apiKey!)
+  }
+  return {
+    apiUrl: ETHERSCAN_V2_API_URL,
+    apiKey,
+    params,
+  }
 }
 
 function inferAssetLabel(transfer: TransferRecord) {

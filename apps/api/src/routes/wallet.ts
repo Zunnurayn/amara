@@ -41,6 +41,7 @@ walletRouter.get('/:address/portfolio', async (req, res) => {
       chains: [
         { chainId: 8453, nativeBalance: '0', totalUsd: '$0.00' },
         { chainId: 1, nativeBalance: '0', totalUsd: '$0.00' },
+        { chainId: 56, nativeBalance: '0', totalUsd: '$0.00' },
       ],
       lastUpdated: Date.now(),
       warnings: [
@@ -59,7 +60,7 @@ walletRouter.get('/:address/transactions', async (req, res) => {
     const requestedChainId = typeof chainId === 'string' ? Number(chainId) : undefined
     const chainIds = typeof requestedChainId === 'number' && Number.isFinite(requestedChainId)
       ? [requestedChainId]
-      : [8453, 1]
+      : [8453, 1, 56]
     const chainTxResults = await Promise.allSettled(
       chainIds.map((currentChainId) => getRecentTransactionsWithDebug(address, currentChainId, lim))
     )

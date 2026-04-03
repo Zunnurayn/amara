@@ -48,7 +48,8 @@ function DesktopSidebar() {
         <div className="mt-3 flex items-center gap-2 text-[10px] text-muted font-mono">
           <ChainLogo chainId={8453} size={14} />
           <ChainLogo chainId={1} size={14} />
-          <span>Base + Ethereum</span>
+          <ChainLogo chainId={56} size={14} />
+          <span>Base + Ethereum + BNB</span>
         </div>
       </div>
 
