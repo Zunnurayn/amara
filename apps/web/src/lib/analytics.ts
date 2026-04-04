@@ -6,6 +6,8 @@ type AnalyticsEvent =
   | 'dashboard_loaded'
   | 'chat_submitted'
   | 'preview_generated'
+  | 'onramp_started'
+  | 'onramp_status_refreshed'
   | 'tx_submitted'
   | 'tx_confirmed'
   | 'tx_failed'

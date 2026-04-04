@@ -18,6 +18,24 @@ export interface BriefSummary {
   generatedAt?: number
 }
 
+export interface OnrampAttempt {
+  id: string
+  provider: string
+  walletAddress: string
+  chainId: number
+  asset: string
+  fiatCurrency: string
+  fiatAmount: number
+  status: 'opening' | 'awaiting_settlement' | 'completed'
+  widgetUrl?: string | null
+  method?: 'hosted' | 'bank_transfer'
+  accountReference?: string | null
+  accountNumber?: string | null
+  bankName?: string | null
+  accountName?: string | null
+  createdAt: number
+}
+
 // ── Wallet Store ──
 interface WalletStore {
   address:      string | null
@@ -28,6 +46,7 @@ interface WalletStore {
   nfts:         WalletNftSummary[]
   chains:       WalletChainSummary[]
   transactions: Transaction[]
+  onrampAttempts: OnrampAttempt[]
   isLoading:    boolean
   error:        string | null
   lastUpdated:  number | null
@@ -42,6 +61,9 @@ interface WalletStore {
     lastUpdated?: number
   }) => void
   setTransactions: (transactions: Transaction[]) => void
+  addOnrampAttempt: (attempt: OnrampAttempt) => void
+  updateOnrampAttempt: (id: string, patch: Partial<OnrampAttempt>) => void
+  removeOnrampAttempt: (id: string) => void
   setLoading:   (loading: boolean) => void
   setError:     (error: string | null) => void
 }
@@ -57,6 +79,7 @@ export const useWalletStore = create<WalletStore>()(
       nfts:         [],
       chains:       [],
       transactions: [],
+      onrampAttempts: [],
       isLoading:    false,
       error:        null,
       lastUpdated:  null,
@@ -65,6 +88,17 @@ export const useWalletStore = create<WalletStore>()(
       setChainId:   (chainId) => set({ chainId }),
       setPortfolio: (data)    => set({ ...data, lastUpdated: data.lastUpdated ?? Date.now(), error: null }),
       setTransactions: (transactions) => set({ transactions, lastUpdated: Date.now(), error: null }),
+      addOnrampAttempt: (attempt) => set((state) => ({
+        onrampAttempts: [attempt, ...state.onrampAttempts].slice(0, 12),
+      })),
+      updateOnrampAttempt: (id, patch) => set((state) => ({
+        onrampAttempts: state.onrampAttempts.map((attempt) => (
+          attempt.id === id ? { ...attempt, ...patch } : attempt
+        )),
+      })),
+      removeOnrampAttempt: (id) => set((state) => ({
+        onrampAttempts: state.onrampAttempts.filter((attempt) => attempt.id !== id),
+      })),
       setLoading:   (loading) => set({ isLoading: loading }),
       setError:     (error) => set({ error }),
     }),

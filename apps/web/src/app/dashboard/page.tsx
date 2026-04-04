@@ -12,17 +12,35 @@ import { track } from '../../lib/analytics'
 import { resolveWalletIdentity } from '../../lib/wallet'
 import { useAuth } from '../../lib/auth'
 import type { AgentActionCard, TokenBalance, WalletChainSummary, WalletNftSummary } from '@anara/types'
+import type { OnrampAttempt } from '../../store'
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000'
 
 export default function DashboardPage() {
-  const { ready, authenticated, syncReady, user, logout } = useAuth()
+  const { ready, authenticated, syncReady, identityToken, user, logout } = useAuth()
   const router  = useRouter()
   const { fetchBrief, fetchStatus, refreshWallet } = useAgent()
-  const { address, totalUsd, tokens, nfts, chains, transactions, isLoading, error, hasWallet, lastUpdated, setAddress, setHasWallet } = useWalletStore()
+  const {
+    address,
+    totalUsd,
+    tokens,
+    nfts,
+    chains,
+    transactions,
+    onrampAttempts,
+    isLoading,
+    error,
+    hasWallet,
+    lastUpdated,
+    setAddress,
+    setHasWallet,
+  } = useWalletStore()
   const { state: agentState, brief, setChatOpen } = useAgentStore()
   const [showBrief, setShowBrief]   = useState(true)
   const [activeTab, setActiveTab]   = useState<'activity' | 'assets' | 'nfts'>('assets')
   const [chainOpen, setChainOpen]   = useState(false)
   const [profileOpen, setProfileOpen] = useState(false)
+  const [showFundSheet, setShowFundSheet] = useState(false)
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [isLoggingOut, setIsLoggingOut] = useState(false)
   const [trackedDashboardLoad, setTrackedDashboardLoad] = useState(false)
@@ -216,12 +234,15 @@ export default function DashboardPage() {
         <div className="mt-5 grid gap-6 xl:grid-cols-[minmax(0,1.4fr)_minmax(340px,0.9fr)] xl:items-start">
           <section className="space-y-4">
             <PortfolioHero
+              walletAddress={address}
+              identityToken={identityToken}
               totalUsd={totalUsd}
               chains={chains}
               activeChainCount={activeChainCount}
               tokenCount={tokens.length}
               nftCount={nfts.length}
               isRefreshing={isRefreshing || isLoading}
+              onOpenFund={() => setShowFundSheet(true)}
               onRefresh={async () => {
                 setIsRefreshing(true)
                 try {
@@ -240,6 +261,10 @@ export default function DashboardPage() {
                 </span>
               </div>
             </div>
+
+            {onrampAttempts.length ? (
+              <OnrampHistoryPanel />
+            ) : null}
 
             <div className="xl:hidden">
             <WalletPanel
@@ -309,6 +334,13 @@ export default function DashboardPage() {
           className="absolute top-1 right-1 w-2.5 h-2.5 rounded-full bg-green border-2 border-gold"
         />
       </button>
+      {showFundSheet ? (
+        <FundWalletSheet
+          walletAddress={address}
+          identityToken={identityToken}
+          onClose={() => setShowFundSheet(false)}
+        />
+      ) : null}
     </div>
   )
 }
@@ -921,11 +953,47 @@ function buildDirectSendPreviewCard(input: {
 }
 
 type SendChainName = 'Base' | 'Ethereum' | 'BNB Chain'
+type OnrampChainName = SendChainName
 
 function getSendChainId(chainName: SendChainName) {
   if (chainName === 'Ethereum') return 1
   if (chainName === 'BNB Chain') return 56
   return 8453
+}
+
+function getOnrampChainId(chainName: OnrampChainName) {
+  return getSendChainId(chainName)
+}
+
+function getOnrampAssetOptions(chainName: OnrampChainName) {
+  if (chainName === 'Ethereum') return ['ETH', 'USDC']
+  if (chainName === 'BNB Chain') return ['BNB', 'USDT', 'USDC']
+  return ['ETH', 'USDC']
+}
+
+function getOnrampStatusCopy(attempt: OnrampAttempt) {
+  if (attempt.status === 'completed') {
+    return `Funds were marked as received in ${attempt.asset} on ${getChainName(attempt.chainId)}.`
+  }
+  if (attempt.status === 'opening') {
+    return attempt.method === 'bank_transfer'
+      ? 'Virtual account is being prepared for NGN transfer instructions.'
+      : 'Hosted checkout is opening. Complete payment and verification in the provider tab.'
+  }
+  if (attempt.method === 'bank_transfer') {
+    return `Awaiting NGN bank transfer${attempt.accountNumber ? ` to ${attempt.accountNumber}` : ''} for cNGN funding.`
+  }
+  return 'Checkout was opened. Funds are still expected from provider settlement or final payment processing.'
+}
+
+function getChainName(chainId: number) {
+  return chainMeta[chainId]?.name ?? `Chain ${chainId}`
+}
+
+function formatCompactFiat(amount: number) {
+  return new Intl.NumberFormat('en-US', {
+    maximumFractionDigits: 0,
+  }).format(amount)
 }
 
 async function buildDirectSwapPreviewCard(input: {
@@ -1332,26 +1400,32 @@ function BriefModal({ brief, onDismiss }: { brief: Brief; onDismiss: () => void 
 }
 
 function PortfolioHero({
+  walletAddress,
+  identityToken,
   totalUsd,
   chains,
   activeChainCount,
   tokenCount,
   nftCount,
   isRefreshing,
+  onOpenFund,
   onRefresh,
 }: {
+  walletAddress: string | null
+  identityToken: string | null
   totalUsd: string
   chains: WalletChainSummary[]
   activeChainCount: number
   tokenCount: number
   nftCount: number
   isRefreshing: boolean
+  onOpenFund: () => void
   onRefresh: () => void | Promise<void>
 }) {
   const router = useRouter()
   const setChatOpen = useAgentStore((state) => state.setChatOpen)
   const [isNavigating, startNavigation] = useTransition()
-  const [pendingAction, setPendingAction] = useState<'send' | 'receive' | 'swap' | 'bridge' | null>(null)
+  const [pendingAction, setPendingAction] = useState<'fund' | 'send' | 'receive' | 'swap' | 'bridge' | null>(null)
   const chainBreakdown = chains.filter((chain) => parseUsdAmount(chain.totalUsd) > 0)
   const totalValue = Math.max(parseUsdAmount(totalUsd), 0.01)
   const summaryChains = [...chains]
@@ -1407,8 +1481,9 @@ function PortfolioHero({
       </div>
 
       {/* Action buttons */}
-      <div className="grid grid-cols-2 gap-2 p-3 border-t border-border sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-2 p-3 border-t border-border sm:grid-cols-5">
         {[
+          { label: 'Fund',    icon: '₦', sheet: 'fund'    as const, color: colors.green  },
           { label: 'Send',    icon: '↑', sheet: 'send'    as const, color: colors.kola   },
           { label: 'Receive', icon: '↓', sheet: 'receive' as const, color: colors.green  },
           { label: 'Swap',    icon: '⇄', sheet: 'swap'    as const, color: colors.gold   },
@@ -1418,18 +1493,23 @@ function PortfolioHero({
             key={a.label}
             onClick={() => {
               setPendingAction(a.sheet)
+              if (a.sheet === 'fund') {
+                onOpenFund()
+                window.setTimeout(() => setPendingAction(null), 300)
+                return
+              }
               startNavigation(() => {
                 setChatOpen(true)
                 router.push(`/dashboard/chat?action=${a.sheet}`)
               })
             }}
-            disabled={isNavigating}
+            disabled={a.sheet === 'fund' ? !walletAddress || !identityToken : isNavigating}
             className="flex-1 flex flex-col items-center gap-1 py-2.5 bg-clay2 border border-border hover:border-border2 transition-colors disabled:opacity-60"
             style={{ borderTopWidth: 2, borderTopColor: a.color }}
           >
             <span className="text-base">{a.icon}</span>
             <span className="text-[9px] font-bold uppercase tracking-wider text-text2">
-              {isNavigating && pendingAction === a.sheet ? 'Opening…' : a.label}
+              {pendingAction === a.sheet ? 'Opening…' : a.label}
             </span>
           </button>
         ))}
@@ -1451,6 +1531,495 @@ function PortfolioHero({
         )}
       </div>
     </Card>
+  )
+}
+
+function FundWalletSheet({
+  walletAddress,
+  identityToken,
+  onClose,
+}: {
+  walletAddress: string | null
+  identityToken: string | null
+  onClose: () => void
+}) {
+  const addOnrampAttempt = useWalletStore((state) => state.addOnrampAttempt)
+  const updateOnrampAttempt = useWalletStore((state) => state.updateOnrampAttempt)
+  const [method, setMethod] = useState<'bank_transfer' | 'hosted'>('bank_transfer')
+  const [chain, setChain] = useState<OnrampChainName>('Base')
+  const [asset, setAsset] = useState('USDC')
+  const [fiatCurrency, setFiatCurrency] = useState<'NGN' | 'USD'>('NGN')
+  const [fiatAmount, setFiatAmount] = useState('50000')
+  const [bankTransferDetails, setBankTransferDetails] = useState<{
+    accountNumber: string
+    accountReference: string
+    bankName?: string | null
+    accountName?: string | null
+  } | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [isOpening, setIsOpening] = useState(false)
+  const assetOptions = getOnrampAssetOptions(chain)
+
+  useEffect(() => {
+    if (!assetOptions.includes(asset)) {
+      setAsset(assetOptions[0] ?? 'USDC')
+    }
+  }, [asset, assetOptions])
+
+  useEffect(() => {
+    if (method === 'bank_transfer') {
+      setAsset('CNGN')
+      setFiatCurrency('NGN')
+      return
+    }
+    if (asset === 'CNGN') {
+      setAsset(assetOptions[0] ?? 'USDC')
+    }
+  }, [asset, assetOptions, method])
+
+  async function handleOpenOnramp() {
+    if (!walletAddress || !identityToken) {
+      setError('A synced wallet session is required before funding can start.')
+      return
+    }
+
+    const amount = Number(fiatAmount)
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setError('Enter a valid fiat amount to continue.')
+      return
+    }
+
+    setIsOpening(true)
+    setError(null)
+    setBankTransferDetails(null)
+
+    try {
+      const chainId = getOnrampChainId(chain)
+      const attemptId = `onramp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+      if (method === 'bank_transfer') {
+        const res = await fetch(`${API_URL}/api/cngn/virtual-account`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${identityToken}`,
+          },
+          body: JSON.stringify({
+            walletAddress,
+          }),
+        })
+
+        const data = await res.json()
+        if (!res.ok) {
+          throw new Error(typeof data?.error === 'string' ? data.error : `cNGN funding request failed with status ${res.status}`)
+        }
+
+        track('onramp_started', {
+          walletAddress,
+          chainId,
+          asset: 'CNGN',
+          fiatCurrency: 'NGN',
+          fiatAmount: amount,
+          provider: data.provider ?? 'cngn',
+        })
+
+        setBankTransferDetails(data.account)
+        addOnrampAttempt({
+          id: attemptId,
+          provider: data.provider ?? 'cngn',
+          walletAddress,
+          chainId,
+          asset: 'CNGN',
+          fiatCurrency: 'NGN',
+          fiatAmount: amount,
+          status: 'awaiting_settlement',
+          method: 'bank_transfer',
+          accountReference: data.account?.accountReference ?? null,
+          accountNumber: data.account?.accountNumber ?? null,
+          bankName: data.account?.bankName ?? null,
+          accountName: data.account?.accountName ?? null,
+          createdAt: Date.now(),
+        })
+        return
+      }
+
+      const res = await fetch(`${API_URL}/api/onramp/session`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${identityToken}`,
+        },
+        body: JSON.stringify({
+          walletAddress,
+          chainId,
+          asset,
+          fiatCurrency,
+          fiatAmount: amount,
+        }),
+      })
+
+      const data = await res.json()
+      if (!res.ok) {
+        throw new Error(typeof data?.error === 'string' ? data.error : `On-ramp request failed with status ${res.status}`)
+      }
+
+      track('onramp_started', {
+        walletAddress,
+        chainId,
+        asset,
+        fiatCurrency,
+        fiatAmount: amount,
+        provider: data.provider ?? 'transak',
+      })
+
+      addOnrampAttempt({
+        id: attemptId,
+        provider: data.provider ?? 'transak',
+        walletAddress,
+        chainId,
+        asset,
+        fiatCurrency,
+        fiatAmount: amount,
+        status: 'opening',
+        method: 'hosted',
+        widgetUrl: data.widgetUrl,
+        createdAt: Date.now(),
+      })
+
+      const nextWindow = window.open(data.widgetUrl, '_blank', 'noopener')
+      if (!nextWindow) {
+        window.location.href = data.widgetUrl
+      }
+      updateOnrampAttempt(attemptId, { status: 'awaiting_settlement' })
+      onClose()
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : 'Unable to open on-ramp right now.')
+    } finally {
+      setIsOpening(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-40">
+      <button
+        aria-label="Close fund wallet sheet"
+        className="absolute inset-0 bg-earth/70"
+        onClick={onClose}
+      />
+      <div className="absolute inset-x-0 bottom-0 mx-auto w-full max-w-md border border-border bg-soil shadow-2xl">
+        <KenteStrip height={4} />
+        <div className="flex items-start justify-between gap-4 border-b border-border p-4">
+          <div>
+            <div className="text-[10px] font-bold tracking-[0.2em] uppercase text-muted">Fund Wallet</div>
+            <div className="mt-1 font-display text-xl font-black text-green">Buy crypto with fiat</div>
+            <div className="mt-2 text-sm leading-6 text-muted">
+              Use Nigerian bank transfer for local users, or fall back to hosted checkout for card and global flows.
+            </div>
+          </div>
+          <button onClick={onClose} className="border border-border px-3 py-1.5 text-xs text-muted hover:border-border2 hover:text-cream">
+            Close
+          </button>
+        </div>
+        <div className="space-y-4 p-4">
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              onClick={() => setMethod('bank_transfer')}
+              className={`border px-3 py-3 text-left ${method === 'bank_transfer' ? 'border-green bg-green/10 text-cream' : 'border-border bg-clay/40 text-text2'}`}
+            >
+              <div className="text-[10px] font-bold uppercase tracking-[0.16em]">Bank Transfer</div>
+              <div className="mt-1 text-[11px] text-muted">Nigeria-first funding with cNGN virtual account.</div>
+            </button>
+            <button
+              onClick={() => setMethod('hosted')}
+              className={`border px-3 py-3 text-left ${method === 'hosted' ? 'border-gold bg-gold/10 text-cream' : 'border-border bg-clay/40 text-text2'}`}
+            >
+              <div className="text-[10px] font-bold uppercase tracking-[0.16em]">Card / Global</div>
+              <div className="mt-1 text-[11px] text-muted">Hosted Transak checkout for broader payment options.</div>
+            </button>
+          </div>
+          {method === 'bank_transfer' ? (
+            <div className="border border-green/25 bg-green/5 p-3 text-[11px] leading-5 text-text2">
+              Bank transfer creates a dedicated virtual account for funding cNGN. After payment, you can mark the funding as received from the dashboard history.
+            </div>
+          ) : null}
+          <QuickField
+            label="Destination chain"
+            control={(
+              <select value={chain} onChange={(event) => setChain(event.target.value as OnrampChainName)} className={quickInputClassName}>
+                <option>Base</option>
+                <option>Ethereum</option>
+                <option>BNB Chain</option>
+              </select>
+            )}
+          />
+          <QuickField
+            label="Asset"
+            control={(
+              <select value={asset} onChange={(event) => setAsset(event.target.value)} className={quickInputClassName}>
+                {(method === 'bank_transfer' ? ['CNGN'] : assetOptions).map((option) => (
+                  <option key={option} value={option}>{option}</option>
+                ))}
+              </select>
+            )}
+          />
+          <div className="grid grid-cols-[1fr_1.25fr] gap-3">
+            <QuickField
+              label="Fiat"
+              control={method === 'bank_transfer' ? (
+                <div className={`${quickInputClassName} flex items-center bg-clay/30`}>NGN</div>
+              ) : (
+                <select value={fiatCurrency} onChange={(event) => setFiatCurrency(event.target.value as 'NGN' | 'USD')} className={quickInputClassName}>
+                  <option value="NGN">NGN</option>
+                  <option value="USD">USD</option>
+                </select>
+              )}
+            />
+            <QuickField
+              label="Amount"
+              control={(
+                <input
+                  value={fiatAmount}
+                  onChange={(event) => setFiatAmount(event.target.value)}
+                  placeholder={method === 'bank_transfer' || fiatCurrency === 'NGN' ? '50000' : '100'}
+                  className={quickInputClassName}
+                />
+              )}
+            />
+          </div>
+          <div className="border border-border bg-clay/50 p-3 text-[11px] leading-5 text-text2">
+            <div className="font-bold uppercase tracking-[0.16em] text-muted">Funding target</div>
+            <div className="mt-1">{asset} on {chain}</div>
+            <div className="font-mono break-all text-[10px] text-muted">{walletAddress ?? 'No wallet linked yet.'}</div>
+          </div>
+          {error ? (
+            <div className="border border-kola/30 bg-kola/10 px-4 py-3 text-xs text-text2">
+              {error}
+            </div>
+          ) : null}
+          {bankTransferDetails ? (
+            <div className="space-y-3 border border-green/30 bg-green/10 p-4">
+              <div>
+                <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-green">Virtual account ready</div>
+                <div className="mt-1 text-[12px] text-text2">Transfer NGN to the account below to mint cNGN for this wallet.</div>
+              </div>
+              <FundingInstructionRow label="Bank" value={bankTransferDetails.bankName ?? 'KoraPay virtual account'} copyValue={bankTransferDetails.bankName ?? undefined} />
+              <FundingInstructionRow label="Account number" value={bankTransferDetails.accountNumber} copyValue={bankTransferDetails.accountNumber} />
+              <FundingInstructionRow label="Reference" value={bankTransferDetails.accountReference} copyValue={bankTransferDetails.accountReference} />
+              {bankTransferDetails.accountName ? (
+                <FundingInstructionRow label="Account name" value={bankTransferDetails.accountName} copyValue={bankTransferDetails.accountName} />
+              ) : null}
+            </div>
+          ) : null}
+          <button
+            onClick={() => { void handleOpenOnramp() }}
+            disabled={isOpening || !walletAddress || !identityToken}
+            className="w-full bg-green px-4 py-3 text-xs font-bold uppercase tracking-wide text-earth disabled:opacity-60"
+          >
+            {isOpening ? (method === 'bank_transfer' ? 'Generating Account…' : 'Opening Checkout…') : (method === 'bank_transfer' ? 'Generate Virtual Account' : 'Continue with Transak')}
+          </button>
+          <div className="text-[11px] leading-5 text-muted">
+            {method === 'bank_transfer'
+              ? 'Bank transfer funding is Nigeria-focused and settles after provider processing. Keep your account reference for reconciliation.'
+              : 'Hosted on-ramp checkout runs outside Amara and may require provider-specific KYC, payment approval, and settlement time.'}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function OnrampHistoryPanel() {
+  const attempts = useWalletStore((state) => state.onrampAttempts)
+  const updateAttempt = useWalletStore((state) => state.updateOnrampAttempt)
+  const removeAttempt = useWalletStore((state) => state.removeOnrampAttempt)
+  const { identityToken } = useAuth()
+  const [refreshError, setRefreshError] = useState<string | null>(null)
+  const [isRefreshing, setIsRefreshing] = useState(false)
+
+  const visibleAttempts = attempts
+    .slice()
+    .sort((left, right) => right.createdAt - left.createdAt)
+    .slice(0, 4)
+
+  if (!visibleAttempts.length) return null
+
+  async function handleRefreshFundingStatus() {
+    if (!identityToken) {
+      setRefreshError('Authenticated session is required before funding status can be refreshed.')
+      return
+    }
+
+    setIsRefreshing(true)
+    setRefreshError(null)
+
+    try {
+      const res = await fetch(`${API_URL}/api/cngn/transactions?page=1&limit=30`, {
+        headers: {
+          Authorization: `Bearer ${identityToken}`,
+        },
+      })
+      const data = await res.json()
+
+      if (!res.ok) {
+        throw new Error(typeof data?.error === 'string' ? data.error : `Status refresh failed with ${res.status}`)
+      }
+
+      const history = Array.isArray(data?.data) ? data.data : []
+      let matchedCount = 0
+
+      visibleAttempts.forEach((attempt) => {
+        if (attempt.provider !== 'cngn') return
+        const match = history.find((entry: Record<string, unknown>) => (
+          typeof entry?.trx_ref === 'string' &&
+          attempt.accountReference &&
+          entry.trx_ref === attempt.accountReference
+        ) || (
+          typeof entry?.receiver === 'object' &&
+          entry.receiver &&
+          typeof (entry.receiver as { accountNumber?: unknown }).accountNumber === 'string' &&
+          attempt.accountNumber &&
+          (entry.receiver as { accountNumber: string }).accountNumber === attempt.accountNumber
+        ))
+
+        if (!match) return
+        matchedCount += 1
+        const nextStatus = typeof match.status === 'string' && match.status.toLowerCase().includes('completed')
+          ? 'completed'
+          : 'awaiting_settlement'
+        updateAttempt(attempt.id, { status: nextStatus })
+      })
+
+      track('onramp_status_refreshed', {
+        provider: 'cngn',
+        attemptCount: visibleAttempts.length,
+        matchedCount,
+      })
+    } catch (error) {
+      setRefreshError(error instanceof Error ? error.message : 'Unable to refresh funding status right now.')
+    } finally {
+      setIsRefreshing(false)
+    }
+  }
+
+  return (
+    <Card>
+      <div className="border-b border-border px-4 py-3">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="text-[9px] font-bold uppercase tracking-[0.2em] text-muted">Funding Activity</div>
+            <div className="mt-1 text-sm text-text2">Recent bank-transfer and hosted funding attempts with their current wallet-side status.</div>
+          </div>
+          <button
+            onClick={() => { void handleRefreshFundingStatus() }}
+            disabled={isRefreshing || !attempts.some((attempt) => attempt.provider === 'cngn')}
+            className="border border-border px-3 py-2 text-[10px] font-bold uppercase tracking-[0.14em] text-text2 disabled:opacity-60"
+          >
+            {isRefreshing ? 'Refreshing…' : 'Refresh status'}
+          </button>
+        </div>
+        {refreshError ? (
+          <div className="mt-3 border border-kola/30 bg-kola/10 px-3 py-2 text-[11px] text-text2">
+            {refreshError}
+          </div>
+        ) : null}
+      </div>
+      <div className="divide-y divide-border">
+        {visibleAttempts.map((attempt) => (
+          <div key={attempt.id} className="flex flex-col gap-3 px-4 py-4 xl:flex-row xl:items-center xl:justify-between">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <ChainLogo chainId={attempt.chainId} size={16} />
+                <div className="text-sm font-bold text-cream">
+                  {attempt.fiatCurrency} {formatCompactFiat(attempt.fiatAmount)} → {attempt.asset}
+                </div>
+                <StatusPill status={attempt.status} />
+              </div>
+              <div className="mt-1 text-[12px] text-text2">
+                {getChainName(attempt.chainId)} · {attempt.provider} · {formatRelativeSync(attempt.createdAt)}
+              </div>
+              <div className="mt-1 text-[11px] leading-5 text-muted">
+                {getOnrampStatusCopy(attempt)}
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {attempt.status !== 'completed' ? (
+                <button
+                  onClick={() => updateAttempt(attempt.id, { status: 'completed' })}
+                  className="border border-green/30 bg-green/10 px-3 py-2 text-[10px] font-bold uppercase tracking-[0.14em] text-green"
+                >
+                  Mark Received
+                </button>
+              ) : null}
+              {attempt.widgetUrl ? (
+                <a
+                  href={attempt.widgetUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="border border-border px-3 py-2 text-[10px] font-bold uppercase tracking-[0.14em] text-text2 hover:border-border2"
+                >
+                  Reopen Checkout
+                </a>
+              ) : null}
+              <button
+                onClick={() => removeAttempt(attempt.id)}
+                className="border border-border px-3 py-2 text-[10px] font-bold uppercase tracking-[0.14em] text-muted hover:border-border2 hover:text-cream"
+              >
+                Hide
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </Card>
+  )
+}
+
+function StatusPill({ status }: { status: OnrampAttempt['status'] }) {
+  const theme = status === 'completed'
+    ? 'border-green/30 bg-green/10 text-green'
+    : status === 'opening'
+      ? 'border-gold/30 bg-gold/10 text-gold2'
+      : 'border-teal/30 bg-teal/10 text-teal'
+
+  return (
+    <span className={`border px-2 py-1 text-[9px] font-bold uppercase tracking-[0.16em] ${theme}`}>
+      {status === 'awaiting_settlement' ? 'Awaiting' : status}
+    </span>
+  )
+}
+
+function FundingInstructionRow({
+  label,
+  value,
+  copyValue,
+}: {
+  label: string
+  value: string
+  copyValue?: string
+}) {
+  const [copied, setCopied] = useState(false)
+
+  async function handleCopy() {
+    if (!copyValue) return
+    await navigator.clipboard.writeText(copyValue)
+    setCopied(true)
+    window.setTimeout(() => setCopied(false), 1200)
+  }
+
+  return (
+    <div className="flex items-center justify-between gap-3 border border-green/15 bg-clay/40 px-3 py-2">
+      <div className="min-w-0">
+        <div className="text-[9px] font-bold uppercase tracking-[0.16em] text-muted">{label}</div>
+        <div className="mt-1 break-all font-mono text-[12px] text-text2">{value}</div>
+      </div>
+      {copyValue ? (
+        <button
+          onClick={() => { void handleCopy() }}
+          className="border border-border px-2 py-1 text-[9px] font-bold uppercase tracking-[0.14em] text-text2"
+        >
+          {copied ? 'Copied' : 'Copy'}
+        </button>
+      ) : null}
+    </div>
   )
 }
 
