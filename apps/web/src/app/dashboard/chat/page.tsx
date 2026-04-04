@@ -311,12 +311,14 @@ function ChatQuickActionPanel({
   onClose: () => void
 }) {
   const [copied, setCopied] = useState(false)
+  const sendTokenOptions = buildSendTokenOptions(tokens)
   const tokenOptions = buildTokenOptions(tokens)
+  const defaultSendToken = sendTokenOptions[0]?.symbol ?? 'ETH'
   const defaultToken = tokenOptions[0]?.symbol ?? 'ETH'
-  const [sendToken, setSendToken] = useState(defaultToken)
+  const [sendToken, setSendToken] = useState(defaultSendToken)
   const [sendAmount, setSendAmount] = useState('')
   const [sendAddress, setSendAddress] = useState('')
-  const [sendChain, setSendChain] = useState<'Base' | 'Ethereum'>('Base')
+  const [sendChain, setSendChain] = useState<SendChainName>('Base')
   const [sendPreviewCard, setSendPreviewCard] = useState<AgentActionCard | null>(null)
   const [sendPreviewError, setSendPreviewError] = useState<string | null>(null)
   const [isSendPreviewLoading, setIsSendPreviewLoading] = useState(false)
@@ -454,7 +456,7 @@ function ChatQuickActionPanel({
             label="Asset"
             control={(
               <select value={sendToken} onChange={(event) => setSendToken(event.target.value)} className={quickInputClassName}>
-                {tokenOptions.map((token) => (
+                {sendTokenOptions.map((token) => (
                   <option key={`${token.symbol}-${token.chain}`} value={token.symbol}>{token.symbol} · {token.chain}</option>
                 ))}
               </select>
@@ -471,9 +473,10 @@ function ChatQuickActionPanel({
           <QuickField
             label="Chain"
             control={(
-              <select value={sendChain} onChange={(event) => setSendChain(event.target.value as 'Base' | 'Ethereum')} className={quickInputClassName}>
+              <select value={sendChain} onChange={(event) => setSendChain(event.target.value as SendChainName)} className={quickInputClassName}>
                 <option>Base</option>
                 <option>Ethereum</option>
+                <option>BNB Chain</option>
               </select>
             )}
           />
@@ -685,6 +688,37 @@ function buildTokenOptions(tokens: TokenBalance[]) {
   return options
 }
 
+function buildSendTokenOptions(tokens: TokenBalance[]) {
+  const seen = new Set<string>()
+  const options = tokens
+    .filter((token) =>
+      (token.chainId === 1 || token.chainId === 56 || token.chainId === 8453) &&
+      (parseUsdAmount(token.balanceUsd) > 0 || parseFloat(token.balanceFormatted || '0') > 0)
+    )
+    .map((token) => ({
+      symbol: token.symbol,
+      chain: token.chainId === 1 ? 'Ethereum' : token.chainId === 56 ? 'BNB Chain' : 'Base',
+    }))
+    .filter((token) => {
+      const key = `${token.symbol}:${token.chain}`
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+
+  if (!options.length) {
+    return [
+      { symbol: 'ETH', chain: 'Base' },
+      { symbol: 'USDC', chain: 'Base' },
+      { symbol: 'ETH', chain: 'Ethereum' },
+      { symbol: 'BNB', chain: 'BNB Chain' },
+      { symbol: 'USDT', chain: 'BNB Chain' },
+    ]
+  }
+
+  return options
+}
+
 function parseUsdAmount(value?: string) {
   if (!value) return 0
   return Number.parseFloat(value.replace(/[$,]/g, '')) || 0
@@ -695,13 +729,13 @@ function buildDirectSendPreviewCard(input: {
   symbol: string
   amount: string
   toAddress: string
-  chainName: 'Base' | 'Ethereum'
+  chainName: SendChainName
 }) {
   const amount = input.amount.trim()
   const toAddress = input.toAddress.trim()
   if (!amount || Number.parseFloat(amount) <= 0) return new Error('Enter a valid amount before previewing the send.')
   if (!toAddress || !/^0x[a-fA-F0-9]{40}$/.test(toAddress)) return new Error('Enter a valid recipient address before previewing the send.')
-  const chainId = input.chainName === 'Ethereum' ? 1 : 8453
+  const chainId = getSendChainId(input.chainName)
   const token = input.tokens.find((entry) => entry.symbol === input.symbol && entry.chainId === chainId)
   if (!token) return new Error(`No ${input.symbol} balance is available on ${input.chainName}.`)
   const priceUsd = parseUsdAmount(token.priceUsd)
@@ -730,6 +764,14 @@ function buildDirectSendPreviewCard(input: {
       estimatedGasUsd: 0.04,
     },
   } satisfies AgentActionCard
+}
+
+type SendChainName = 'Base' | 'Ethereum' | 'BNB Chain'
+
+function getSendChainId(chainName: SendChainName) {
+  if (chainName === 'Ethereum') return 1
+  if (chainName === 'BNB Chain') return 56
+  return 8453
 }
 
 async function buildDirectSwapPreviewCard(input: {

@@ -15,7 +15,7 @@ import type {
   WalletNftSummary,
 } from '@anara/types'
 import { useAuth } from '../lib/auth'
-import { base, mainnet } from 'viem/chains'
+import { base, bsc, mainnet } from 'viem/chains'
 import {
   createWalletClient,
   custom,
@@ -834,8 +834,19 @@ function delay(ms: number) {
 }
 
 async function getWalletClientForChain(wallet: ExecutionWallet, chainId: number) {
-  await wallet.switchChain(chainId)
   const provider = await wallet.getEthereumProvider()
+  try {
+    await wallet.switchChain(chainId)
+  } catch (error) {
+    const normalizedChainId = `0x${chainId.toString(16)}`
+    await (provider as Eip1193Provider).request({
+      method: 'wallet_switchEthereumChain',
+      params: [{ chainId: normalizedChainId }],
+    })
+    if (error instanceof Error) {
+      console.warn('[wallet client setup] falling back to provider switchChain', error.message)
+    }
+  }
   return createWalletClient({
     account: wallet.address as Address,
     chain: getChain(chainId),
@@ -847,6 +858,8 @@ function getChain(chainId: number) {
   switch (chainId) {
     case 1:
       return mainnet
+    case 56:
+      return bsc
     case 8453:
       return base
     default:
@@ -858,7 +871,7 @@ function resolveTokenConfig(metadata: AgentActionMetadata) {
   const symbol = metadata.fromTokenSymbol?.toUpperCase()
   const chainId = metadata.fromChainId ?? 8453
 
-  if (symbol === 'ETH') {
+  if (symbol === 'ETH' || symbol === 'BNB') {
     return {
       address: zeroAddress,
       decimals: metadata.fromTokenDecimals ?? 18,
@@ -882,7 +895,11 @@ function isNativeTokenAddress(address?: string) {
 }
 
 function buildExplorerUrl(chainId: number, txHash: string) {
-  const host = chainId === 1 ? 'https://etherscan.io' : 'https://basescan.org'
+  const host = chainId === 1
+    ? 'https://etherscan.io'
+    : chainId === 56
+      ? 'https://bscscan.com'
+      : 'https://basescan.org'
   return `${host}/tx/${txHash}`
 }
 

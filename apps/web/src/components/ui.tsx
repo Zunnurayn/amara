@@ -164,6 +164,19 @@ export function ChainLogo({
   size?: number
   className?: string
 }) {
+  const localLogoSrc = getLocalChainLogoSrc(chainId)
+  if (localLogoSrc) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={localLogoSrc}
+        alt={chainMeta[chainId]?.name ?? `Chain ${chainId}`}
+        className={cn('object-cover', chainId === 8453 ? 'rounded-[22%]' : 'rounded-full', className)}
+        style={{ width: size, height: size }}
+      />
+    )
+  }
+
   if (chainId === 1) {
     return (
       <div
@@ -231,13 +244,15 @@ export function TokenLogo({
 }) {
   const [imageFailed, setImageFailed] = useState(false)
   const initials = (symbol || name || '?').replace(/[^A-Za-z0-9]/g, '').slice(0, 2).toUpperCase() || '?'
-  const hasImage = Boolean(logoUrl && !imageFailed)
+  const localLogoSrc = getLocalTokenLogoSrc(symbol, chainId)
+  const resolvedLogoSrc = localLogoSrc ?? logoUrl
+  const hasImage = Boolean(resolvedLogoSrc && !imageFailed)
 
   if (hasImage) {
     return (
       // eslint-disable-next-line @next/next/no-img-element
       <img
-        src={logoUrl}
+        src={resolvedLogoSrc}
         alt={name ?? symbol}
         className={cn('rounded-full border border-border/30 object-cover bg-clay', className)}
         style={{ width: size, height: size }}
@@ -270,6 +285,21 @@ function getTokenFallbackColor(chainId?: number) {
   if (chainId === 1) return colors.chains.eth
   if (chainId === 56) return colors.chains.bnb
   return colors.chains.base
+}
+
+function getLocalChainLogoSrc(chainId: number) {
+  if (chainId === 56) return '/logos/bnb-logo.svg'
+  if (chainId === 8453) return '/logos/base-logo.png'
+  return null
+}
+
+function getLocalTokenLogoSrc(symbol: string, chainId?: number) {
+  const normalized = symbol.toUpperCase()
+  if (normalized === 'USDC') return '/logos/usdc-logo.png'
+  if (normalized === 'USDT') return '/logos/usdt-logo.png'
+  if ((normalized === 'ETH' || normalized === 'WETH') && chainId === 8453) return '/logos/eth-base-logo.png'
+  if (normalized === 'BNB') return '/logos/bnb-logo.svg'
+  return null
 }
 
 export function Card({
