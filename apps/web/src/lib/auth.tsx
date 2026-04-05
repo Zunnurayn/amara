@@ -10,8 +10,10 @@ import {
 } from 'react'
 import {
   PrivyProvider,
+  useActiveWallet,
   useLogout,
   usePrivy,
+  useWallets,
   type User,
 } from '@privy-io/react-auth'
 import { base, mainnet } from 'viem/chains'
@@ -70,6 +72,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
 function AuthSessionProvider({ children }: { children: React.ReactNode }) {
   const { ready, authenticated, user, login: openLogin, getAccessToken } = usePrivy()
+  const { wallets, ready: walletsReady } = useWallets()
+  const { wallet: activeWallet } = useActiveWallet()
   const { logout } = useLogout()
   const lastSyncedRef = useRef<string | null>(null)
   const [identityToken, setIdentityToken] = useState<string | null>(null)
@@ -109,7 +113,12 @@ function AuthSessionProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!ready || !authenticated || !identityToken || !user?.id) return
 
-    const { address } = resolveWalletIdentity(user)
+    const resolvedIdentity = resolveWalletIdentity(user)
+    const sessionWalletAddress =
+      activeWallet?.address ??
+      wallets.find((wallet) => typeof wallet?.address === 'string')?.address ??
+      null
+    const address = sessionWalletAddress ?? resolvedIdentity.address
     const currentUser = user
     const syncKey = `${user.id}:${address ?? 'no-wallet'}`
     if (lastSyncedRef.current === syncKey) return
@@ -162,7 +171,7 @@ function AuthSessionProvider({ children }: { children: React.ReactNode }) {
     return () => {
       cancelled = true
     }
-  }, [authenticated, identityToken, ready, user])
+  }, [activeWallet?.address, authenticated, identityToken, ready, user, wallets, walletsReady])
 
   const value = useMemo<AuthContextValue>(() => ({
     ready,
