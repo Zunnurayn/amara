@@ -2,6 +2,7 @@
   "name": "anara",
   "version": "0.1.0",
   "private": true,
+  "packageManager": "pnpm@10.28.0",
   "description": "Anara — The world's first autonomous multichain wallet",
   "engines": {
     "node": ">=20.0.0",
