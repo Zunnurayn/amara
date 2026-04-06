@@ -33,6 +33,11 @@ export interface NftSummary {
 }
 
 const MAX_TOKENS_PER_CHAIN = 30
+const STABLE_PRICE_FALLBACKS: Record<string, number> = {
+  USDC: 1,
+  USDT: 1,
+  DAI: 1,
+}
 
 function hasUsableAlchemyKey() {
   const key = process.env.ALCHEMY_API_KEY?.trim()
@@ -182,17 +187,36 @@ export async function getNativeBalance(address: string, chainId: number): Promis
 
 // ── Get token prices (CoinGecko) ───────────────────────────────────
 export async function getTokenPrices(symbols: string[]): Promise<Record<string, number>> {
+  const prices: Record<string, number> = {}
+
+  for (const symbol of symbols) {
+    const upper = symbol.toUpperCase()
+    if (typeof STABLE_PRICE_FALLBACKS[upper] === 'number') {
+      prices[upper] = STABLE_PRICE_FALLBACKS[upper]
+    }
+  }
+
   const ids = symbols
-    .map(s => COINGECKO_IDS[s.toUpperCase()])
+    .map(s => s.toUpperCase())
+    .filter((symbol) => typeof prices[symbol] !== 'number')
+    .map(s => COINGECKO_IDS[s])
     .filter(Boolean)
     .join(',')
 
-  if (!ids) return {}
+  if (!ids) return prices
 
-  const res  = await fetch(`${COINGECKO_URL}/simple/price?ids=${ids}&vs_currencies=usd&include_24hr_change=true`)
+  const res = await fetch(`${COINGECKO_URL}/simple/price?ids=${ids}&vs_currencies=usd&include_24hr_change=true`, {
+    headers: {
+      Accept: 'application/json',
+    },
+  })
+
+  if (!res.ok) {
+    throw new Error(`Price API HTTP ${res.status}`)
+  }
+
   const data = await res.json() as any
 
-  const prices: Record<string, number> = {}
   for (const sym of symbols) {
     const id = COINGECKO_IDS[sym.toUpperCase()]
     if (id && data[id]) {
@@ -299,7 +323,15 @@ export async function buildPortfolio(address: string) {
   )
 
   const symbols = Array.from(new Set(metadataList.map(t => t.meta?.symbol).filter(Boolean))) as string[]
-  const priceMap: Record<string, number> = await getTokenPrices(['ETH', 'BNB', ...symbols]).catch(() => ({}))
+  let priceWarning: string | null = null
+  const priceMap: Record<string, number> = await getTokenPrices(['ETH', 'BNB', ...symbols]).catch((error) => {
+    priceWarning = error instanceof Error ? error.message : 'Price provider unavailable.'
+    return { ...STABLE_PRICE_FALLBACKS }
+  })
+
+  if (priceWarning) {
+    warnings.push(`price provider: ${priceWarning}`)
+  }
 
   let totalUsdValue = 0
   const chainTotals: Record<number, number> = Object.fromEntries(supportedChains.map((chainId) => [chainId, 0])) as Record<number, number>
